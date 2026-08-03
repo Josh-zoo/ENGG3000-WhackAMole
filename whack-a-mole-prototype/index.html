@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whack-a-Mole Concept Tester</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --panel: rgba(15, 23, 42, 0.82);
+      --panel-border: rgba(148, 163, 184, 0.22);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #22c55e;
+      --accent-2: #f97316;
+      --danger: #ef4444;
+      --cell: #111827;
+      --cell-border: #334155;
+      --mole: #f59e0b;
+      --cursor: #38bdf8;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 36%),
+        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.15), transparent 30%),
+        linear-gradient(145deg, #030712, var(--bg));
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(980px, 100%);
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1.2fr 0.8fr;
+    }
+
+    .hero, .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero {
+      padding: 28px;
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.24em;
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 4vw, 3.6rem);
+      line-height: 0.95;
+    }
+
+    .intro {
+      margin: 0 0 18px;
+      max-width: 52ch;
+      color: #cbd5e1;
+      line-height: 1.6;
+    }
+
+    .status-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      color: #e5e7eb;
+      font-size: 0.95rem;
+    }
+
+    .pill strong { color: white; }
+
+    .board-wrap {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(280px, 1fr);
+      align-items: start;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(74px, 1fr));
+      gap: 12px;
+      width: min(520px, 100%);
+      aspect-ratio: 1 / 1;
+      padding: 14px;
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(2, 6, 23, 0.92));
+      border: 1px solid rgba(148, 163, 184, 0.16);
+    }
+
+    .cell {
+      position: relative;
+      border: 2px solid var(--cell-border);
+      border-radius: 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), transparent),
+        radial-gradient(circle at top, rgba(255,255,255,0.04), transparent 60%),
+        var(--cell);
+      display: grid;
+      place-items: center;
+      transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+      min-height: 94px;
+      overflow: hidden;
+    }
+
+    .cell::before {
+      content: attr(data-label);
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      font-size: 0.78rem;
+      color: rgba(226, 232, 240, 0.45);
+    }
+
+    .cell.cursor {
+      border-color: var(--cursor);
+      box-shadow: inset 0 0 0 2px rgba(56, 189, 248, 0.2), 0 0 0 2px rgba(56, 189, 248, 0.08);
+      transform: translateY(-2px);
+    }
+
+    .cell.mole {
+      border-color: var(--mole);
+      background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.03)), var(--cell);
+    }
+
+    .cell.hit {
+      border-color: var(--accent);
+      background: linear-gradient(180deg, rgba(34, 197, 94, 0.18), rgba(34, 197, 94, 0.03)), var(--cell);
+    }
+
+    .token {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 1.2rem;
+      font-weight: 700;
+      user-select: none;
+    }
+
+    .mole .token {
+      background: radial-gradient(circle at 30% 25%, #fde68a, #f59e0b 55%, #b45309 100%);
+      color: #1f2937;
+      box-shadow: 0 10px 24px rgba(245, 158, 11, 0.3);
+    }
+
+    .cursor .token {
+      background: radial-gradient(circle at 30% 25%, #c0f2ff, #38bdf8 58%, #0284c7 100%);
+      color: #0f172a;
+      box-shadow: 0 10px 24px rgba(56, 189, 248, 0.28);
+    }
+
+    .panel {
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+    }
+
+    .metrics {
+      display: grid;
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .metric span { color: var(--muted); }
+    .metric strong { font-size: 1.35rem; }
+
+    .controls {
+      display: grid;
+      gap: 10px;
+      color: #cbd5e1;
+      line-height: 1.5;
+      font-size: 0.96rem;
+    }
+
+    .controls kbd {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.14);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      color: white;
+      font-size: 0.9rem;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(180deg, #2563eb, #1d4ed8);
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.28);
+    }
+
+    button.secondary {
+      background: linear-gradient(180deg, #334155, #1f2937);
+      box-shadow: none;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .message {
+      min-height: 2.5em;
+      color: #e2e8f0;
+    }
+
+    .message.good { color: #86efac; }
+    .message.warn { color: #fde68a; }
+    .message.bad { color: #fca5a5; }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .board { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div class="eyebrow">Concept tester</div>
+      <h1>Whack-a-Mole Grid Prototype</h1>
+      <p class="intro">
+        This demo visualises the game loop behind the project: a player acts as a cursor,
+        moves across a 3x3 grid, and must stand on the mole tile before the timer expires.
+      </p>
+
+      <div class="status-bar">
+        <div class="pill">Level <strong id="level">1</strong></div>
+        <div class="pill">Score <strong id="score">0</strong></div>
+        <div class="pill">Timer <strong id="timer">4.0s</strong></div>
+        <div class="pill">Cursor <strong id="cursorLabel">A1</strong></div>
+        <div class="pill">Mole <strong id="moleLabel">B2</strong></div>
+      </div>
+
+      <div class="board-wrap">
+        <div id="board" class="board" aria-label="3 by 3 game board"></div>
+        <div id="message" class="message warn">Press Start, then use the arrow keys or WASD to move the cursor.</div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2>Interface Logic</h2>
+      <div class="metrics">
+        <div class="metric"><span>Current target rule</span><strong>Stand on mole at timeout</strong></div>
+        <div class="metric"><span>Grid size</span><strong>3 x 3</strong></div>
+        <div class="metric"><span>Round speed</span><strong id="speedLabel">4.0s</strong></div>
+      </div>
+
+      <div class="controls">
+        <div><kbd>Arrow Keys</kbd> or <kbd>W A S D</kbd> move the cursor.</div>
+        <div>If the cursor is on the mole when the timer expires, you score a hit.</div>
+        <div>Every 3 hits, the round gets faster to simulate increasing difficulty.</div>
+        <div>This keeps the tester focused on the interface and game loop rather than the physical sensor stack.</div>
+      </div>
+
+      <div class="buttons">
+        <button id="startBtn">Start</button>
+        <button id="resetBtn" class="secondary">Reset</button>
+      </div>
+
+      <div class="footer-note">
+        In the hardware version, the physical player would replace the cursor position data.
+        This visualiser keeps the logic simple so you can validate the concept, the timing, and the level progression.
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const board = document.getElementById('board');
+    const scoreEl = document.getElementById('score');
+    const levelEl = document.getElementById('level');
+    const timerEl = document.getElementById('timer');
+    const speedLabel = document.getElementById('speedLabel');
+    const cursorLabel = document.getElementById('cursorLabel');
+    const moleLabel = document.getElementById('moleLabel');
+    const messageEl = document.getElementById('message');
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    const labels = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3'];
+    const cells = [];
+
+    const state = {
+      running: false,
+      score: 0,
+      level: 1,
+      cursor: 0,
+      mole: 4,
+      roundDuration: 4000,
+      roundEndsAt: 0,
+      timerId: null,
+      nextRoundId: null
+    };
+
+    function createBoard() {
+      board.innerHTML = '';
+      labels.forEach((label, index) => {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.index = String(index);
+        cell.dataset.label = label;
+        const token = document.createElement('div');
+        token.className = 'token';
+        cell.appendChild(token);
+        board.appendChild(cell);
+        cells.push(cell);
+      });
+    }
+
+    function randomMole(exclude = state.cursor) {
+      const options = labels.map((_, index) => index).filter((index) => index !== exclude);
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function gridLabel(index) {
+      return labels[index];
+    }
+
+    function render() {
+      cells.forEach((cell, index) => {
+        cell.classList.toggle('cursor', index === state.cursor);
+        cell.classList.toggle('mole', index === state.mole);
+        cell.classList.remove('hit');
+        const token = cell.querySelector('.token');
+        token.textContent = index === state.cursor ? 'P' : index === state.mole ? 'M' : '';
+      });
+      scoreEl.textContent = String(state.score);
+      levelEl.textContent = String(state.level);
+      cursorLabel.textContent = gridLabel(state.cursor);
+      moleLabel.textContent = gridLabel(state.mole);
+      speedLabel.textContent = `${(state.roundDuration / 1000).toFixed(1)}s`;
+    }
+
+    function setMessage(text, tone = '') {
+      messageEl.textContent = text;
+      messageEl.className = `message ${tone}`.trim();
+    }
+
+    function startRound() {
+      state.mole = randomMole();
+      state.roundEndsAt = performance.now() + state.roundDuration;
+      render();
+      clearTimeout(state.nextRoundId);
+      state.nextRoundId = setTimeout(resolveRound, state.roundDuration);
+      if (state.running) {
+        state.timerId = requestAnimationFrame(updateTimer);
+      }
+    }
+
+    function resolveRound() {
+      if (!state.running) {
+        return;
+      }
+
+      if (state.cursor === state.mole) {
+        state.score += 1;
+        cells[state.cursor].classList.add('hit');
+        setMessage(`Hit confirmed on ${gridLabel(state.mole)}.`, 'good');
+        if (state.score % 3 === 0) {
+          state.level += 1;
+          state.roundDuration = Math.max(1400, state.roundDuration - 450);
+          setMessage(`Level up. The timer is now faster.`, 'warn');
+        }
+      } else {
+        setMessage(`Missed ${gridLabel(state.mole)}. Move earlier next round.`, 'bad');
+      }
+
+      render();
+      startRound();
+    }
+
+    function updateTimer(now) {
+      if (!state.running) {
+        return;
+      }
+      const remaining = Math.max(0, state.roundEndsAt - now);
+      timerEl.textContent = `${(remaining / 1000).toFixed(1)}s`;
+      if (remaining > 0) {
+        state.timerId = requestAnimationFrame(updateTimer);
+      }
+    }
+
+    function moveCursor(nextIndex) {
+      if (!state.running) {
+        return;
+      }
+      if (nextIndex < 0 || nextIndex > 8) {
+        return;
+      }
+      state.cursor = nextIndex;
+      render();
+    }
+
+    function handleKey(event) {
+      const key = event.key.toLowerCase();
+      const row = Math.floor(state.cursor / 3);
+      const col = state.cursor % 3;
+      let next = state.cursor;
+
+      if (key === 'arrowup' || key === 'w') next = Math.max(0, state.cursor - 3);
+      if (key === 'arrowdown' || key === 's') next = Math.min(8, state.cursor + 3);
+      if (key === 'arrowleft' || key === 'a') next = col > 0 ? state.cursor - 1 : state.cursor;
+      if (key === 'arrowright' || key === 'd') next = col < 2 ? state.cursor + 1 : state.cursor;
+
+      if (next !== state.cursor) {
+        event.preventDefault();
+        moveCursor(next);
+      }
+    }
+
+    function startGame() {
+      if (state.running) {
+        return;
+      }
+      state.running = true;
+      startBtn.textContent = 'Running';
+      setMessage('Game started. Move the cursor onto the mole before the timer ends.', 'good');
+      startRound();
+    }
+
+    function resetGame() {
+      state.running = false;
+      state.score = 0;
+      state.level = 1;
+      state.cursor = 0;
+      state.mole = 4;
+      state.roundDuration = 4000;
+      state.roundEndsAt = 0;
+      clearTimeout(state.nextRoundId);
+      cancelAnimationFrame(state.timerId);
+      startBtn.textContent = 'Start';
+      timerEl.textContent = '4.0s';
+      setMessage('Reset complete. Press Start to begin again.', 'warn');
+      render();
+    }
+
+    createBoard();
+    render();
+
+    startBtn.addEventListener('click', startGame);
+    resetBtn.addEventListener('click', resetGame);
+    window.addEventListener('keydown', handleKey);
+  </script>
+</body>
+</html>
