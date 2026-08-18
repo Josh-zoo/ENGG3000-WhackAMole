@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Main",
+            "request": "launch",
+            "mainClass": "whackamole.Main",
+            "projectName": "mole-game_fca9eb75"
+        },
+        {
+            "type": "java",
+            "name": "Launch Main",
+            "request": "launch",
+            "mainClass": "whackamole.Main",
+            "projectName": "mole-game"
+        }
+    ]
+}
