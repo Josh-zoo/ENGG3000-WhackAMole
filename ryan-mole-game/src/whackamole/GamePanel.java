@@ -28,10 +28,13 @@ import java.util.Random;
  */
 public class GamePanel extends JPanel {
 
-    private static final int GRID_ROWS = 3;
-    private static final int GRID_COLS = 3;
-    private static final int HOLE_DIAMETER = 100;
-    private static final int HOLE_GAP = 20;
+    // Two boxes side by side, matching the physical rig: a 100 cm wide field
+    // split into Box 1 (left) and Box 2 (right). Which box the player is in
+    // comes from the TRIANGULATED x position (see SensorInputBridge).
+    private static final int GRID_ROWS = 1;
+    private static final int GRID_COLS = 2;
+    private static final int HOLE_DIAMETER = 140;
+    private static final int HOLE_GAP = 30;
     private static final int BOARD_WIDTH_PX = GRID_COLS * HOLE_DIAMETER + (GRID_COLS + 1) * HOLE_GAP;
     private static final int BOARD_HEIGHT_PX = GRID_ROWS * HOLE_DIAMETER + (GRID_ROWS + 1) * HOLE_GAP;
     private static final int GAME_DURATION_MS = 60_000; // one round = 60 seconds
@@ -207,6 +210,7 @@ public class GamePanel extends JPanel {
         drawCursor(g2, mousePoint);
         drawSensorLabel(g2, sensorCellLabel);
         drawSerialLabel(g2, sensorDebugLabel);
+        drawFixLabel(g2, sensorInputBridge.getLastFixDescription());
     }
 
     private void drawHole(Graphics2D g2, Mole mole) {
@@ -265,6 +269,13 @@ public class GamePanel extends JPanel {
         g2.drawString(label, 10, 38);
     }
 
+    /** Live triangulation readout — shows the computed (x, y) for the demo. */
+    private void drawFixLabel(Graphics2D g2, String label) {
+        g2.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        g2.setColor(new Color(140, 235, 255));
+        g2.drawString(label, 10, 56);
+    }
+
     private String describeCell(Point point) {
         if (point == null || point.x < 0 || point.y < 0) {
             return "Cell: --";
@@ -275,6 +286,12 @@ public class GamePanel extends JPanel {
         int column = Math.max(0, Math.min(GRID_COLS - 1, point.x / cellWidth));
         int row = Math.max(0, Math.min(GRID_ROWS - 1, point.y / cellHeight));
 
+        if (GRID_ROWS == 1) {
+            return "Box: " + (column + 1);
+        }
+        if (GRID_COLS == 1) {
+            return "Box: " + (row + 1);
+        }
         char columnLetter = (char) ('A' + column);
         return "Cell: " + columnLetter + (row + 1);
     }

@@ -37,13 +37,25 @@ float measureDistanceCM(int trigPin, int echoPin) {
   return duration * 0.0343 / 2.0;
 }
 
-void sendYValue(float yValue) {
-  if (yValue < 0) {
-    return;
+// Format one sensor reading for the payload (-1 means no echo).
+void formatReading(char *buffer, size_t size, float value) {
+  if (value < 0) {
+    snprintf(buffer, size, "No echo");
+  } else {
+    snprintf(buffer, size, "%.1f cm", value);
   }
+}
 
-  char payload[32];
-  snprintf(payload, sizeof(payload), "y:%.1f", yValue);
+// Send both sensor readings in one packet so the game can tell
+// WHICH sensor is picking up the player, not just how far away they are.
+void sendSensorValues(float distance1, float distance2) {
+  char reading1[16];
+  char reading2[16];
+  formatReading(reading1, sizeof(reading1), distance1);
+  formatReading(reading2, sizeof(reading2), distance2);
+
+  char payload[64];
+  snprintf(payload, sizeof(payload), "Sensor 1: %s Sensor 2: %s", reading1, reading2);
 
   udp.beginPacket(PC_IP, PC_PORT);
   udp.write((const uint8_t *)payload, strlen(payload));
@@ -87,9 +99,10 @@ void loop() {
   delay(60);
   float distance2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
 
-  // For the current demo, use the second sensor as the Y-position source.
-  // This is to keep game input simple, and testable.
-  sendYValue(distance2);
+  // Send BOTH readings so the game can triangulate the player position.
+  sendSensorValues(distance1, distance2);
 
-  delay(200);
+  // Short cycle keeps the cursor responsive; at tabletop ranges the echoes
+  // return in a few ms, and the 60 ms stagger above still prevents crosstalk.
+  delay(100);
 }
