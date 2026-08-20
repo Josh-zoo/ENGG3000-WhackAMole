@@ -15,7 +15,7 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-
+import java.awt.Toolkit;
 /**
  * The game board: draws the holes/moles, tracks the mouse, and runs the
  * spawn/score loop. Scoring rule: a mole is a hit if the cursor is over it
@@ -51,6 +51,8 @@ public class GamePanel extends JPanel {
     private Point mousePoint = new Point(-1, -1);
     private String sensorCellLabel = "Cell: --";
     private String sensorDebugLabel = "Wireless: waiting...";
+    private boolean inDeadZone = false;         //DeadZone
+    private boolean previousDeadZone = false;   //DeadZone
     private int score = 0;
     private long nextSpawnAtMs = 0;
     private long roundEndAtMs = 0;
@@ -88,6 +90,15 @@ public class GamePanel extends JPanel {
         if (point != null) {
             mousePoint = point;
             sensorCellLabel = describeCell(point);
+
+            inDeadZone = isDeadZone(point);
+
+            if (inDeadZone && !previousDeadZone)
+            {
+                Toolkit.getDefaultToolkit().beep();
+            }
+
+            previousDeadZone = inDeadZone;
         }
         repaint();
     }
@@ -192,6 +203,17 @@ public class GamePanel extends JPanel {
     }
 
     // ---- rendering ---------------------------------------------------------
+    private boolean isDeadZone(Point point)
+    {
+        if (point == null)
+        {
+            return false;
+        }
+
+        //Prototype
+        // Top 50 pixels of our board represent the dead zone
+        return point.y < 50;
+    }
 
     @Override
     protected void paintComponent(Graphics g) {
@@ -211,6 +233,23 @@ public class GamePanel extends JPanel {
         drawSensorLabel(g2, sensorCellLabel);
         drawSerialLabel(g2, sensorDebugLabel);
         drawFixLabel(g2, sensorInputBridge.getLastFixDescription());
+        mousePoint = new Point(100, 20);
+        inDeadZone = isDeadZone(mousePoint);
+        if (inDeadZone)
+        {
+            drawDeadZoneWarning(g2);
+        }
+    }
+
+    private void drawDeadZoneWarning(Graphics2D g2)
+    {
+        g2.setColor(new Color(220, 0,0, 180));
+        g2.fillRect(0, 0, getWidth(), 35);
+
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 18));
+
+        g2.drawString("DEAD ZONE - MOVE BACK", 10, 24);
     }
 
     private void drawHole(Graphics2D g2, Mole mole) {
