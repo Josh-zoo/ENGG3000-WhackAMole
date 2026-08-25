@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultrasonic Sensor Coverage Sandbox</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f0efec;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --border:         #d8d6d0;
+    --cov-both:       #2a78d6;  /* covered by both sensors */
+    --cov-one:        #9ec5f4;  /* covered by one sensor  */
+    --dead:           #e34948;  /* uncovered inside a box */
+    --neutral-zone:   #e7e5e0;  /* designed dead space    */
+    --sensor:         #eda100;
+    --good:           #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #262624;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --border:         #3d3c39;
+      --cov-both:       #3987e5;
+      --cov-one:        #1c5cab;
+      --dead:           #e66767;
+      --neutral-zone:   #2e2e2b;
+      --sensor:         #c98500;
+      --good:           #35a13c;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--surface-1); }
+  .viz-root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--surface-1); color: var(--text-primary);
+    max-width: 980px; margin: 0 auto; padding: 20px 24px 32px;
+  }
+  h1 { font-size: 18px; font-weight: 650; margin-bottom: 2px; }
+  .sub { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
+  .controls {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 10px 22px; margin-bottom: 6px;
+  }
+  .ctl label { display:flex; justify-content: space-between; font-size: 12.5px;
+    color: var(--text-secondary); margin-bottom: 2px; }
+  .ctl b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--cov-both); }
+  .presets { display:flex; gap:8px; margin: 8px 0 14px; flex-wrap: wrap; }
+  .presets button {
+    font: 600 12px/1 inherit; font-family: inherit; padding: 7px 12px;
+    border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); cursor: pointer;
+  }
+  .presets button:hover { border-color: var(--cov-both); }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px;
+    font-size: 12.5px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+  .stats { display: flex; gap: 14px; margin-top: 12px; flex-wrap: wrap; }
+  .tile { background: var(--surface-2); border-radius: 8px; padding: 10px 16px; min-width: 170px; }
+  .tile .k { font-size: 11.5px; color: var(--text-secondary); text-transform: uppercase;
+    letter-spacing: .04em; margin-bottom: 3px; }
+  .tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+  .note { margin-top: 14px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="viz-root" id="root">
+  <h1>Ultrasonic sensor coverage sandbox</h1>
+  <div class="sub">Top-down view &mdash; wall on the left, sensors fire rightward into the field. Lane 50&thinsp;cm wide, 50&thinsp;cm designed dead space, then Box&nbsp;1 (50&ndash;100&thinsp;cm) and Box&nbsp;2 (100&ndash;150&thinsp;cm). A spot counts as covered if a person of the chosen width standing there would return an echo.</div>
+
+  <div class="controls">
+    <div class="ctl"><label>Sensor 1 position <b id="v_s1">12.5 cm</b></label>
+      <input type="range" id="s1" min="0" max="50" step="0.5" value="12.5"></div>
+    <div class="ctl"><label>Sensor 2 position <b id="v_s2">37.5 cm</b></label>
+      <input type="range" id="s2" min="0" max="50" step="0.5" value="37.5"></div>
+    <div class="ctl"><label>Toe-in (each, toward centre) <b id="v_toe">0&deg;</b></label>
+      <input type="range" id="toe" min="0" max="20" step="0.5" value="0"></div>
+    <div class="ctl"><label>Beam half-angle <b id="v_beam">7.5&deg;</b></label>
+      <input type="range" id="beam" min="3" max="22" step="0.5" value="7.5"></div>
+    <div class="ctl"><label>Person width <b id="v_pw">30 cm</b></label>
+      <input type="range" id="pw" min="0" max="45" step="1" value="30"></div>
+    <div class="ctl"><label>Max range <b id="v_rng">160 cm</b></label>
+      <input type="range" id="rng" min="100" max="250" step="5" value="160"></div>
+  </div>
+
+  <div class="presets">
+    <button data-p="12.5,37.5,0">Quarter points</button>
+    <button data-p="17,33,0">Close pair</button>
+    <button data-p="12.5,37.5,5">Quarter + 5&deg; toe-in</button>
+    <button data-p="2,48,12">Edges, crossed 12&deg;</button>
+    <button data-p="25,25,0">Single centre (stacked)</button>
+  </div>
+
+  <canvas id="cv" width="1960" height="760"></canvas>
+
+  <div class="legend">
+    <span><span class="sw" style="background:var(--cov-both)"></span> seen by both sensors</span>
+    <span><span class="sw" style="background:var(--cov-one)"></span> seen by one sensor</span>
+    <span><span class="sw" style="background:var(--dead)"></span> dead space inside a box</span>
+    <span><span class="sw" style="background:var(--neutral-zone); border:1px solid var(--border)"></span> designed 50&thinsp;cm dead zone</span>
+    <span><span class="sw" style="background:var(--sensor); border-radius:50%"></span> sensor</span>
+  </div>
+
+  <div class="stats">
+    <div class="tile"><div class="k">Box 1 coverage</div><div class="v" id="st_b1">&ndash;</div></div>
+    <div class="tile"><div class="k">Box 2 coverage</div><div class="v" id="st_b2">&ndash;</div></div>
+    <div class="tile"><div class="k">Widest gap in Box 1</div><div class="v" id="st_gap">&ndash;</div></div>
+  </div>
+
+  <div class="note">Person width matters: the map treats a location as covered if <em>any part</em> of a person that wide standing there intersects a beam cone. Set it to 0 to see the harsh point-target picture, 30 for a realistic torso/legs. HC-SR04 datasheets quote a 15&deg; total measuring angle (7.5&deg; half-angle); soft clothing at long range behaves closer to the narrow end, hard targets wider. Coverage percentages are computed on a 1&thinsp;cm grid; the gap readout is the widest across-the-lane dead strip anywhere in Box&nbsp;1.</div>
+</div>
+
+<script>
+(function () {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+
+  // world: depth y 0..160 cm (left->right), lane x 0..50 cm (top->bottom)
+  const DEPTH = 160, LANE = 50;
+  const PAD_L = 70, PAD_R = 30, PAD_T = 40, PAD_B = 60;
+  const SCALE = (cv.width - PAD_L - PAD_R) / DEPTH; // px per cm
+  const laneH = LANE * SCALE;
+
+  const els = {};
+  ['s1','s2','toe','beam','pw','rng'].forEach(id => {
+    els[id] = document.getElementById(id);
+    els[id].addEventListener('input', draw);
+  });
+  document.querySelectorAll('.presets button').forEach(b => {
+    b.addEventListener('click', () => {
+      const [a, c, t] = b.dataset.p.split(',').map(Number);
+      els.s1.value = a; els.s2.value = c; els.toe.value = t;
+      draw();
+    });
+  });
+
+  function cssVar(name) {
+    return getComputedStyle(document.getElementById('root')).getPropertyValue(name).trim();
+  }
+
+  // is a person of width pw, centred at (depth d, lane x), seen by sensor at lane sx?
+  // sensor fires along +depth, toed toward lane centre by 'toe' radians.
+  function seen(d, x, sx, toe, half, pw, maxR) {
+    const dirA = (sx <= LANE / 2 ? 1 : -1) * toe; // rotate toward centre
+    // vector sensor -> point, in (depth, lane) coords
+    const vd = d, vx = x - sx;
+    const dist = Math.hypot(vd, vx);
+    if (dist - pw / 2 > maxR) return false;
+    if (dist < 2) return false; // sensor near-field blind zone
+    const ang = Math.atan2(vx, vd);           // angle off straight-out
+    const off = Math.abs(ang - dirA);         // angle off beam centre
+    if (off <= half) return true;
+    // lateral miss distance of the person's centre from the cone edge
+    const miss = dist * Math.sin(off - half);
+    return miss <= pw / 2;
+  }
+
+  function draw() {
+    const s1 = +els.s1.value, s2 = +els.s2.value;
+    const toe = +els.toe.value * Math.PI / 180;
+    const half = +els.beam.value * Math.PI / 180;
+    const pw = +els.pw.value, maxR = +els.rng.value;
+
+    document.getElementById('v_s1').textContent = s1 + ' cm';
+    document.getElementById('v_s2').textContent = s2 + ' cm';
+    document.getElementById('v_toe').textContent = els.toe.value + '°';
+    document.getElementById('v_beam').textContent = els.beam.value + '°';
+    document.getElementById('v_pw').textContent = pw + ' cm';
+    document.getElementById('v_rng').textContent = maxR + ' cm';
+
+    const C = {
+      surface: cssVar('--surface-1'), zone: cssVar('--neutral-zone'),
+      both: cssVar('--cov-both'), one: cssVar('--cov-one'),
+      dead: cssVar('--dead'), border: cssVar('--border'),
+      ink: cssVar('--text-primary'), ink2: cssVar('--text-secondary'),
+      sensor: cssVar('--sensor')
+    };
+
+    ctx.fillStyle = C.surface;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+
+    // coverage grid, 1 cm cells
+    const STEP = 1;
+    let b1cov = 0, b1tot = 0, b2cov = 0, b2tot = 0;
+    const gapAt = []; // per-depth-cm: is there any dead cell across the lane? track widest run
+    for (let d = 0; d < DEPTH; d += STEP) {
+      let rowDead = false;
+      for (let x = 0; x < LANE; x += STEP) {
+        const cd = d + STEP / 2, cx = x + STEP / 2;
+        const a = seen(cd, cx, s1, toe, half, pw, maxR);
+        const b = seen(cd, cx, s2, toe, half, pw, maxR);
+        const inBox = cd >= 50 && cd < 150;
+        let fill = null;
+        if (a && b) fill = C.both;
+        else if (a || b) fill = C.one;
+        else if (inBox) { fill = C.dead; }
+        else fill = C.zone;
+        if (inBox) {
+          const covered = a || b;
+          if (cd < 100) { b1tot++; if (covered) b1cov++; else rowDead = true; }
+          else { b2tot++; if (covered) b2cov++; }
+        }
+        if (fill) {
+          ctx.fillStyle = fill;
+          ctx.globalAlpha = (fill === C.zone) ? 1 : (fill === C.dead ? 0.85 : 0.9);
+          ctx.fillRect(PAD_L + d * SCALE, PAD_T + x * SCALE, STEP * SCALE + 0.6, STEP * SCALE + 0.6);
+          ctx.globalAlpha = 1;
+        }
+      }
+      if (d >= 50 && d < 100) gapAt.push(rowDead);
+    }
+
+    // widest contiguous dead-strip run (in depth) within box 1
+    let widest = 0, run = 0;
+    gapAt.forEach(g => { run = g ? run + 1 : 0; widest = Math.max(widest, run); });
+
+    // grid lines: box boundaries
+    ctx.strokeStyle = C.border; ctx.lineWidth = 2;
+    [0, 50, 100, 150].forEach(d => {
+      ctx.beginPath();
+      ctx.moveTo(PAD_L + d * SCALE, PAD_T);
+      ctx.lineTo(PAD_L + d * SCALE, PAD_T + laneH);
+      ctx.stroke();
+    });
+    ctx.strokeRect(PAD_L, PAD_T, DEPTH * SCALE, laneH);
+
+    // wall
+    ctx.fillStyle = C.ink;
+    ctx.fillRect(PAD_L - 8, PAD_T - 6, 8, laneH + 12);
+
+    // beam centre-lines
+    ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
+    [[s1], [s2]].forEach(([sx]) => {
+      const dirA = (sx <= LANE / 2 ? 1 : -1) * toe;
+      ctx.strokeStyle = C.sensor;
+      ctx.beginPath();
+      ctx.moveTo(PAD_L, PAD_T + sx * SCALE);
+      ctx.lineTo(PAD_L + Math.cos(dirA) * maxR * SCALE,
+                 PAD_T + (sx + Math.sin(dirA) * maxR) * SCALE);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    // sensors
+    [s1, s2].forEach((sx, i) => {
+      ctx.fillStyle = C.sensor;
+      ctx.beginPath();
+      ctx.arc(PAD_L, PAD_T + sx * SCALE, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = C.surface; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = C.ink;
+      ctx.font = '600 22px -apple-system, "Segoe UI", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('S' + (i + 1), PAD_L - 16, PAD_T + sx * SCALE + 8);
+    });
+
+    // labels
+    ctx.fillStyle = C.ink2;
+    ctx.font = '500 22px -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('dead zone', PAD_L + 25 * SCALE, PAD_T + laneH + 34);
+    ctx.fillText('Box 1', PAD_L + 75 * SCALE, PAD_T + laneH + 34);
+    ctx.fillText('Box 2', PAD_L + 125 * SCALE, PAD_T + laneH + 34);
+    ctx.textAlign = 'left';
+    [0, 50, 100, 150].forEach(d => {
+      ctx.fillText(d + ' cm', PAD_L + d * SCALE + 6, PAD_T - 12);
+    });
+
+    // stats
+    const p1 = b1tot ? Math.round(100 * b1cov / b1tot) : 0;
+    const p2 = b2tot ? Math.round(100 * b2cov / b2tot) : 0;
+    const good = cssVar('--good');
+    const st1 = document.getElementById('st_b1');
+    const st2 = document.getElementById('st_b2');
+    const stg = document.getElementById('st_gap');
+    st1.textContent = p1 + '%'; st1.style.color = p1 === 100 ? good : (p1 < 90 ? C.dead : '');
+    st2.textContent = p2 + '%'; st2.style.color = p2 === 100 ? good : (p2 < 90 ? C.dead : '');
+    stg.innerHTML = widest === 0 ? 'none' : widest + '<small> cm deep</small>';
+    stg.style.color = widest === 0 ? good : C.dead;
+  }
+
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (mq.addEventListener) mq.addEventListener('change', draw);
+  draw();
+})();
+</script>
+</body>
+</html>
