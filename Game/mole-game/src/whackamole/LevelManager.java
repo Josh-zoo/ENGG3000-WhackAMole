@@ -13,10 +13,10 @@ import java.util.List;
 public class LevelManager {
 
     private static final List<Level> LEVELS = List.of(
-            new Level(1, 3000, 3200, 1300, 1400, 1, 10, 50),
-            new Level(2, 2800, 3000, 1050, 1150, 1, 15, 150),
-            new Level(3, 2300, 2500, 850, 950, 1, 20, 300),
-            new Level(4, 1300, 1500, 700, 800, 2, 25, 500),
+            new Level(1, 2500, 2700, 1300, 1400, 1, 10, 50),
+            new Level(2, 2000, 2300, 1050, 1150, 1, 15, 150),
+            new Level(3, 1900, 2100, 850, 950, 1, 20, 300),
+            new Level(4, 1000, 1300, 700, 800, 2, 25, 500),
             new Level(5, 800, 1100, 550, 650, 2, 30, Integer.MAX_VALUE) // final level
     );
 
