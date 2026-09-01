@@ -62,13 +62,6 @@ public class GamePanel extends JPanel {
         setPreferredSize(new Dimension(BOARD_WIDTH_PX, BOARD_HEIGHT_PX));
         setBackground(new Color(94, 61, 30));
 
-        addMouseMotionListener(new MouseMotionAdapter() {
-            @Override
-            public void mouseMoved(MouseEvent e) {
-                mousePoint = e.getPoint();
-            }
-        });
-
         loopTimer = new Timer(FRAME_DELAY_MS, e -> tick());
         layoutHoles();
 
@@ -84,23 +77,29 @@ public class GamePanel extends JPanel {
         sensorInputBridge.updatePosition(point.x, point.y);
     }
 
+
     public void handleSensorLine(String line) {
         sensorDebugLabel = "Wireless: " + line;
         Point point = sensorInputBridge.parseLine(line);
+
         if (point != null) {
             mousePoint = point;
             sensorCellLabel = describeCell(point);
 
-            inDeadZone = isDeadZone(point);
-
-            if (inDeadZone && !previousDeadZone)
-            {
-                Toolkit.getDefaultToolkit().beep();
-            }
-
-            previousDeadZone = inDeadZone;
+        updateDeadZone(point);
         }
-        repaint();
+
+    repaint();
+    }
+
+    private void updateDeadZone(Point point) {
+    inDeadZone = isDeadZone(point);
+
+    if (inDeadZone && !previousDeadZone) {
+        Toolkit.getDefaultToolkit().beep();
+    }
+
+    previousDeadZone = inDeadZone;
     }
 
     public void startGame() {
@@ -233,10 +232,16 @@ public class GamePanel extends JPanel {
         drawSensorLabel(g2, sensorCellLabel);
         drawSerialLabel(g2, sensorDebugLabel);
         drawFixLabel(g2, sensorInputBridge.getLastFixDescription());
-        mousePoint = new Point(100, 20);
-        inDeadZone = isDeadZone(mousePoint);
-        if (inDeadZone)
-        {
+        //mousePoint = new Point(100, 20);
+        //inDeadZone = isDeadZone(mousePoint);
+        //if (inDeadZone)
+        //{
+          //  drawDeadZoneWarning(g2);
+        //}
+        //mousePoint = new Point(100, 20);
+        //updateDeadZone(mousePoint);
+
+        if (inDeadZone) {
             drawDeadZoneWarning(g2);
         }
     }
@@ -314,6 +319,7 @@ public class GamePanel extends JPanel {
         g2.setColor(new Color(140, 235, 255));
         g2.drawString(label, 10, 56);
     }
+
 
     private String describeCell(Point point) {
         if (point == null || point.x < 0 || point.y < 0) {
