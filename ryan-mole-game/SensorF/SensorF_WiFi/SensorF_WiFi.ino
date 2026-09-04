@@ -3,19 +3,19 @@
 #include <WiFiUdp.h>
 
 // Sensor Pins
-const int TRIG_PIN_1 = 22;
-const int ECHO_PIN_1 = 23;
+const int TRIG_PIN_1 = 32;
+const int ECHO_PIN_1 = 33;
 const int TRIG_PIN_2 = 12;
 const int ECHO_PIN_2 = 13;
 
 const unsigned long ECHO_TIMEOUT = 30000; // 30 ms
 
 // Wifi Settings
-const char *WIFI_SSID = "Galaxy S25 Ultra C297";
-const char *WIFI_PASSWORD = "testing1234";
+const char *WIFI_SSID = "iPhone (2)";
+const char *WIFI_PASSWORD = "theultrasaim";
 
 // IP Address (of Laptop connected to Hotspot)
-const char *PC_IP = "10.140.219.33";
+const char *PC_IP = "172.20.10.11";
 const uint16_t PC_PORT = 4210;
 
 WiFiUDP udp;

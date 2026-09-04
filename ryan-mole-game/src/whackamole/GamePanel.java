@@ -31,8 +31,8 @@ public class GamePanel extends JPanel {
     // Two boxes side by side, matching the physical rig: a 100 cm wide field
     // split into Box 1 (left) and Box 2 (right). Which box the player is in
     // comes from the TRIANGULATED x position (see SensorInputBridge).
-    private static final int GRID_ROWS = 1;
-    private static final int GRID_COLS = 2;
+    private static final int GRID_ROWS = 3;
+    private static final int GRID_COLS = 3;
     private static final int HOLE_DIAMETER = 140;
     private static final int HOLE_GAP = 30;
     private static final int BOARD_WIDTH_PX = GRID_COLS * HOLE_DIAMETER + (GRID_COLS + 1) * HOLE_GAP;
