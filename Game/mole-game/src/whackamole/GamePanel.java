@@ -25,7 +25,7 @@ public class GamePanel extends JPanel {
     private static final int CELL_W = 132;
     private static final int CELL_H = 148;
     private static final int CELL_GAP = 14;
-    private static final int BORDER = 20; // thickness of the wooden cabinet frame
+    private static final int BORDER = 20; // thickness of the frame
     private static final int SKY_HEIGHT = 56; // strip of sky above the grass/holes
 
     // ---- pixel-art tuning --------------------------------------------------
@@ -34,7 +34,7 @@ public class GamePanel extends JPanel {
     private static final int HOLE_H = 44;
     private static final int HOLE_BOTTOM_MARGIN = 10; // gap from cell bottom to hole center
 
-    // Hand-authored 16x14 pixel-art mole sprite. Each character is one
+    // 16x14 pixel-art mole sprite. Each character is one
     // PIXEL x PIXEL block. '.' is transparent; see colorFor() for the rest.
     private static final String[] MOLE_SPRITE = {
         "................",
@@ -70,6 +70,8 @@ public class GamePanel extends JPanel {
     private static final Color SKY_COLOR = new Color(120, 200, 255);
     private static final Color CLOUD_COLOR = Color.WHITE;
     private static final Color SUN_COLOR = new Color(255, 221, 89);
+    private static final Color TIMER_BAR_BG = new Color(40, 30, 20);
+    private static final Color TIMER_BAR_FILL = new Color(255, 215, 0);
 
     // ---- timing --------------------------------------------------------------
     private static final int GAME_DURATION_MS = 60_000; // one round = 60 seconds
@@ -77,6 +79,9 @@ public class GamePanel extends JPanel {
     private static final long POP_ANIM_MS = 110;           // rise animation duration
     private static final long SINK_ANIM_MS = 140;          // sink animation duration
     private static final int RISE_DISTANCE = 42;            // vertical travel, in px
+    private static final int TIMER_BAR_WIDTH = 90;
+    private static final int TIMER_BAR_HEIGHT = 6;
+
 
     private final List<Mole> moles = new ArrayList<>();
     private final List<Rectangle> cellBounds = new ArrayList<>();
@@ -269,6 +274,7 @@ public class GamePanel extends JPanel {
             int holeOpeningY = drawPixelHole(g2, cell);
             if (mole.isVisible()) {
                 drawPoppedMole(g2, mole, cell, holeOpeningY, now);
+                drawTimerBar(g2, cell, mole, now);
             }
         }
     }
@@ -360,6 +366,24 @@ public class GamePanel extends JPanel {
         g2.clipRect(cell.x, cell.y, cell.width, clipHeight);
         drawMoleSprite(g2, baseX, currentY);
         g2.setClip(oldClip);
+    }
+
+
+    /** Draws a shrinking yellow countdown bar just under the hole, showing time left before it hides. */
+    private void drawTimerBar(Graphics2D g2, Rectangle cell, Mole mole, long now) {
+        double remaining = mole.remainingFraction(now);
+        int barX = cell.x + (cell.width - TIMER_BAR_WIDTH) / 2;
+        int barY = cell.y + cell.height - TIMER_BAR_HEIGHT - 3;
+
+        g2.setColor(TIMER_BAR_BG);
+        g2.fillRect(barX, barY, TIMER_BAR_WIDTH, TIMER_BAR_HEIGHT);
+
+        int filledWidth = (int) Math.round(TIMER_BAR_WIDTH * remaining);
+        g2.setColor(TIMER_BAR_FILL);
+        g2.fillRect(barX, barY, filledWidth, TIMER_BAR_HEIGHT);
+
+        g2.setColor(MOLE_OUTLINE);
+        g2.drawRect(barX, barY, TIMER_BAR_WIDTH, TIMER_BAR_HEIGHT);
     }
 
     private void drawMoleSprite(Graphics2D g2, int originX, int originY) {

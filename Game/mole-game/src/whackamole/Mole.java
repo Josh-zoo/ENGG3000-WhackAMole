@@ -75,6 +75,13 @@ public class Mole {
     return Math.max(0, Math.min(1, t));
 }
 
+/** 0..1 fraction of up-time remaining — 1 = just popped up, 0 = about to expire or sinking. */
+    public double remainingFraction(long nowMs) {
+        if (!visible || isSinking() || upDurationMs <= 0) return 0;
+        double remaining = upDurationMs - (nowMs - popTimeMs);
+        return Math.max(0, Math.min(1, remaining / (double) upDurationMs));
+    }
+
     /** Whether the given point (e.g. the cursor) falls within this mole's hole. */
     public boolean contains(Point p) {
         if (p == null) return false;
