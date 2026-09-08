@@ -51,21 +51,31 @@ void formatReading(char *buffer, size_t size, float value) {
 void sendSensorValues(float distance1, float distance2) {
   char reading1[16];
   char reading2[16];
+
   formatReading(reading1, sizeof(reading1), distance1);
   formatReading(reading2, sizeof(reading2), distance2);
 
   char payload[64];
-  snprintf(payload, sizeof(payload), "Sensor 1: %s Sensor 2: %s", reading1, reading2);
+  snprintf(payload, sizeof(payload),
+           "Sensor 1: %s Sensor 2: %s",
+           reading1, reading2);
 
   udp.beginPacket(PC_IP, PC_PORT);
   udp.write((const uint8_t *)payload, strlen(payload));
-  udp.endPacket();
+
+  int result = udp.endPacket();
+
+  Serial.print("UDP result = ");
+  Serial.println(result);
 
   Serial.println(payload);
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("=====New Code ======");
 
   pinMode(TRIG_PIN_1, OUTPUT);
   pinMode(ECHO_PIN_1, INPUT);
