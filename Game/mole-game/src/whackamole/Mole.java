@@ -16,6 +16,7 @@ public class Mole {
     private long popTimeMs = 0;      // timestamp when it appeared
     private long upDurationMs = 0;   // how long it stays up before expiring
     private boolean resolved = true; // true once this pop-up has been handled (scored/missed)
+    private long hideStartMs = -1;   // timestamp the sinking animation began; -1 if not sinking
 
     public Mole(int x, int y, int diameter) {
         this.x = x;
@@ -29,19 +30,29 @@ public class Mole {
         this.popTimeMs = nowMs;
         this.upDurationMs = upDurationMs;
         this.resolved = false;
+        this.hideStartMs = -1;
     }
 
     public void hide() {
         this.visible = false;
+        this.hideStartMs = -1;
     }
 
     public boolean isVisible() {
         return visible;
     }
 
+    public void startSinking(long nowMS) {
+        this.hideStartMs = nowMS;
+    }
+
+    public boolean isSinking() {
+        return hideStartMs >= 0;
+    }
+
     /** True once this mole's up-time has run out (whether or not it's been handled yet). */
     public boolean isExpired(long nowMs) {
-        return visible && (nowMs - popTimeMs >= upDurationMs);
+        return visible && !isSinking() && (nowMs - popTimeMs >= upDurationMs);
     }
 
     public boolean isResolved() {
@@ -52,12 +63,17 @@ public class Mole {
         resolved = true;
     }
 
-    /** Fraction of up-time remaining, 0..1 — handy for drawing a shrinking timer ring. */
-    public double timeRemainingFraction(long nowMs) {
-        if (!visible || upDurationMs <= 0) return 0;
-        double remaining = upDurationMs - (nowMs - popTimeMs);
-        return Math.max(0, Math.min(1, remaining / (double) upDurationMs));
+    
+    public double popFraction(long nowMs, long risingAnimMs, long sinkingAnimMs) {
+    if (isSinking()) {
+        if (sinkingAnimMs <= 0) return 0;
+        double t = (nowMs - hideStartMs) / (double) sinkingAnimMs;
+        return 1 - Math.max(0, Math.min(1, t));
     }
+    if (!visible || risingAnimMs <= 0) return visible ? 1 : 0;
+    double t = (nowMs - popTimeMs) / (double) risingAnimMs;
+    return Math.max(0, Math.min(1, t));
+}
 
     /** Whether the given point (e.g. the cursor) falls within this mole's hole. */
     public boolean contains(Point p) {
