@@ -17,22 +17,31 @@ import java.util.List;
 import java.util.Random;
 import java.awt.Toolkit;
 /**
- * The game board: draws the holes/moles, tracks the mouse, and runs the
- * spawn/score loop. Scoring rule: a mole is a hit if the cursor is over it
- * at the moment its up-timer expires (not a click).
+ * The game board: draws the holes/moles, tracks the player's sensor-derived
+ * box, and runs the spawn/score loop.
  *
- * To extend the game (new mole types, power-ups, different scoring, a pause
- * feature, etc.) this is the file you'll touch — but the grid layout,
- * rendering, input handling, and level/scoring logic are already split into
- * separate, fairly small methods so changes stay localized.
+ * Scoring rule: a mole is a hit the instant the player's tracked (column,
+ * row) box matches the mole's box. That match is checked on a fixed-interval
+ * "ping" (see pingTimer / PING_INTERVAL_MS below), decoupled from the ~60fps
+ * render loop, so scoring cadence matches how often the sensors actually
+ * produce a new position fix rather than firing every frame. A mole that
+ * expires without ever being matched is simply a miss.
+ *
+ * To extend the game (new mole types, power-ups, a pause feature, etc.) this
+ * is the file you'll touch — but the grid layout, rendering, input handling,
+ * and level/scoring logic are already split into separate, fairly small
+ * methods so changes stay localized.
  */
 public class GamePanel extends JPanel {
 
-    // Two boxes side by side, matching the physical rig: a 100 cm wide field
-    // split into Box 1 (left) and Box 2 (right). Which box the player is in
-    // comes from the TRIANGULATED x position (see SensorInputBridge).
+    // 2 columns x 3 depth rows = 6 boxes, matching the physical rig: a field
+    // split left/right by the triangulated x, and near/mid/far by the
+    // triangulated y (see SensorInputBridge). Moles are laid out row-major
+    // (row 0 first), so mole list index i corresponds to row = i / GRID_COLS,
+    // col = i % GRID_COLS — this must stay in sync with SensorInputBridge's
+    // own NUM_COLS/NUM_ROWS.
     private static final int GRID_ROWS = 3;
-    private static final int GRID_COLS = 3;
+    private static final int GRID_COLS = 2;
     private static final int HOLE_DIAMETER = 140;
     private static final int HOLE_GAP = 30;
     private static final int BOARD_WIDTH_PX = GRID_COLS * HOLE_DIAMETER + (GRID_COLS + 1) * HOLE_GAP;
@@ -40,11 +49,19 @@ public class GamePanel extends JPanel {
     private static final int GAME_DURATION_MS = 60_000; // one round = 60 seconds
     private static final int FRAME_DELAY_MS = 16;        // ~60 fps game loop
 
+    // Live position ping: how often we check the player's current box against
+    // active moles. 150ms matches the sensor pair's own fire rate (each
+    // sensor fires with a ~60ms gap between them, so a full two-sensor fix
+    // lands every ~120-150ms) — polling faster than that would just re-check
+    // the same reading.
+    private static final int PING_INTERVAL_MS = 150;
+
     private final List<Mole> moles = new ArrayList<>();
     private final List<GameListener> listeners = new ArrayList<>();
     private final Random random = new Random();
     private final LevelManager levelManager = new LevelManager();
     private final Timer loopTimer;
+    private final Timer pingTimer;
     private final SensorInputBridge sensorInputBridge = new SensorInputBridge(BOARD_WIDTH_PX, BOARD_HEIGHT_PX, 60.0);
     private final UdpSensorReader udpSensorReader;
 
@@ -63,6 +80,7 @@ public class GamePanel extends JPanel {
         setBackground(new Color(94, 61, 30));
 
         loopTimer = new Timer(FRAME_DELAY_MS, e -> tick());
+        pingTimer = new Timer(PING_INTERVAL_MS, e -> checkForHit());
         layoutHoles();
 
         udpSensorReader = new UdpSensorReader(this::handleSensorLine);
@@ -84,7 +102,7 @@ public class GamePanel extends JPanel {
 
         if (point != null) {
             mousePoint = point;
-            sensorCellLabel = describeCell(point);
+            sensorCellLabel = describeCell();
 
         updateDeadZone(point);
         }
@@ -112,6 +130,7 @@ public class GamePanel extends JPanel {
         scheduleNextSpawn(now);
         running = true;
         loopTimer.start();
+        pingTimer.start();
 
         fireScoreChanged();
         fireLevelChanged();
@@ -121,6 +140,7 @@ public class GamePanel extends JPanel {
     public void stopGame() {
         running = false;
         loopTimer.stop();
+        pingTimer.stop();
         for (Mole m : moles) m.hide();
         repaint();
     }
@@ -156,7 +176,7 @@ public class GamePanel extends JPanel {
 
         Level level = levelManager.getCurrentLevel();
         maybeSpawnMole(now, level);
-        resolveExpiredMoles(now, level);
+        resolveExpiredMoles(now);
 
         repaint();
     }
@@ -174,16 +194,45 @@ public class GamePanel extends JPanel {
         }
     }
 
-    private void resolveExpiredMoles(long now, Level level) {
+    /**
+     * The live ping: runs every PING_INTERVAL_MS, independent of the render
+     * loop. Reads the player's current (column, row) from the sensor bridge
+     * and scores any visible, unresolved mole occupying that same box.
+     */
+    private void checkForHit() {
+        if (!running) return;
+
+        int col = sensorInputBridge.getCurrentColumn();
+        int row = sensorInputBridge.getCurrentRow();
+        if (col < 0 || row < 0) return; // no valid fix yet — nothing to check
+
+        for (int i = 0; i < moles.size(); i++) {
+            Mole mole = moles.get(i);
+            if (!mole.isVisible() || mole.isResolved()) continue;
+
+            int moleRow = i / GRID_COLS;
+            int moleCol = i % GRID_COLS;
+            if (moleRow == row && moleCol == col) {
+                registerHit(mole);
+            }
+        }
+    }
+
+    private void registerHit(Mole mole) {
+        Level level = levelManager.getCurrentLevel();
+        score += level.getPointsPerHit();
+        fireScoreChanged();
+        if (levelManager.maybeAdvance(score)) {
+            fireLevelChanged();
+        }
+        mole.markResolved();
+        mole.hide(); // pop back down immediately, like a real whack
+    }
+
+    /** Moles whose up-time ran out without ever being matched by checkForHit() are simply misses. */
+    private void resolveExpiredMoles(long now) {
         for (Mole mole : moles) {
             if (mole.isExpired(now) && !mole.isResolved()) {
-                if (mole.contains(mousePoint)) {
-                    score += level.getPointsPerHit();
-                    fireScoreChanged();
-                    if (levelManager.maybeAdvance(score)) {
-                        fireLevelChanged();
-                    }
-                }
                 mole.markResolved();
                 mole.hide();
             }
@@ -232,14 +281,6 @@ public class GamePanel extends JPanel {
         drawSensorLabel(g2, sensorCellLabel);
         drawSerialLabel(g2, sensorDebugLabel);
         drawFixLabel(g2, sensorInputBridge.getLastFixDescription());
-        //mousePoint = new Point(100, 20);
-        //inDeadZone = isDeadZone(mousePoint);
-        //if (inDeadZone)
-        //{
-          //  drawDeadZoneWarning(g2);
-        //}
-        //mousePoint = new Point(100, 20);
-        //updateDeadZone(mousePoint);
 
         if (inDeadZone) {
             drawDeadZoneWarning(g2);
@@ -320,24 +361,14 @@ public class GamePanel extends JPanel {
         g2.drawString(label, 10, 56);
     }
 
-
-    private String describeCell(Point point) {
-        if (point == null || point.x < 0 || point.y < 0) {
+    /** Reads column/row straight from the bridge, so this always agrees with checkForHit(). */
+    private String describeCell() {
+        int col = sensorInputBridge.getCurrentColumn();
+        int row = sensorInputBridge.getCurrentRow();
+        if (col < 0 || row < 0) {
             return "Cell: --";
         }
-
-        int cellWidth = BOARD_WIDTH_PX / GRID_COLS;
-        int cellHeight = BOARD_HEIGHT_PX / GRID_ROWS;
-        int column = Math.max(0, Math.min(GRID_COLS - 1, point.x / cellWidth));
-        int row = Math.max(0, Math.min(GRID_ROWS - 1, point.y / cellHeight));
-
-        if (GRID_ROWS == 1) {
-            return "Box: " + (column + 1);
-        }
-        if (GRID_COLS == 1) {
-            return "Box: " + (row + 1);
-        }
-        char columnLetter = (char) ('A' + column);
+        char columnLetter = (char) ('A' + col);
         return "Cell: " + columnLetter + (row + 1);
     }
 

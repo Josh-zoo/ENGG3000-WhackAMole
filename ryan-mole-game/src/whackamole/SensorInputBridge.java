@@ -7,7 +7,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Small bridge that turns incoming sensor data into a point the game can use.
+ * Small bridge that turns incoming sensor data into a point/cell the game can use.
  *
  * TRIANGULATION (trilateration) version. Physical rig, all in cm:
  *
@@ -15,9 +15,13 @@ import java.util.regex.Pattern;
  * wall:  |----S1----------S2----|     S1 at x=25, S2 at x=75 (baseline 50)
  *        :      dead zone       :     0-50 cm out from the wall
  *        +----------+-----------+
- *        |  BOX 1   |   BOX 2   |     both boxes 50-100 cm deep,
- *        | (x 0-50) | (x 50-100)|     side by side across a 100 cm field
+ *        |  ROW 0   |   ROW 0   |     depth split into 3 rows away from
+ *        +----------+-----------+     the wall. Row 0 = nearest the sensors
+ *        |  ROW 1   |   ROW 1   |     = top row on screen. 2 columns x 3
+ *        +----------+-----------+     rows = 6 boxes total.
+ *        |  ROW 2   |   ROW 2   |
  *        +----------+-----------+
+ *        COL 0        COL 1
  * </pre>
  *
  * Each sensor reading is the radius of a circle around that sensor. With the
@@ -27,13 +31,16 @@ import java.util.regex.Pattern;
  *   xFromS1 = (r1^2 - r2^2 + B^2) / (2B)
  *   y       = sqrt(r1^2 - xFromS1^2)
  *
- * The triangulated x picks the column (box). This is the "calibrated spatial
- * positioning" / triangulation requirement made concrete: the horizontal
- * position cannot be derived from either sensor alone, only from fusing both.
+ * The triangulated x picks the column, the triangulated y picks the depth row.
+ * This is the "calibrated spatial positioning" / triangulation requirement
+ * made concrete: neither axis can be derived from a single sensor alone.
  *
  * If only one sensor echoes, we fall back to that sensor's half of the field
- * (you can only be inside the beam of the sensor that sees you), so the game
- * stays playable at the field edges where the beams don't overlap.
+ * for the column (you can only be inside the beam of the sensor that sees
+ * you), and approximate the row from that sensor's raw range as depth. This
+ * is a coarser estimate than triangulated y (it ignores the small x offset),
+ * but it keeps the game playable at the field edges where the beams don't
+ * overlap.
  *
  * The diagram above shows the full floor-scale numbers; the TABLE_TEST flag
  * below switches every dimension to a 1:2 scale tabletop rig (50 cm field,
@@ -71,22 +78,32 @@ public class SensorInputBridge {
     private static final double SENSOR_2_X_CM      = TABLE_TEST ? 37.5 : 75.0;
     private static final double BASELINE_CM = SENSOR_2_X_CM - SENSOR_1_X_CM;
     private static final double FIELD_WIDTH_CM     = TABLE_TEST ? 50.0 : 100.0;
-    private static final double COLUMN_BOUNDARY_CM = TABLE_TEST ? 25.0 : 50.0;  // box 1 | box 2 split
+    private static final double COLUMN_BOUNDARY_CM = TABLE_TEST ? 25.0 : 50.0;  // col 0 | col 1 split
     private static final double DEAD_ZONE_CM       = TABLE_TEST ? 25.0 : 50.0;  // empty strip at the sensors
     private static final double BOX_FAR_EDGE_CM    = TABLE_TEST ? 50.0 : 100.0; // far edge of the boxes
-    private static final int NUM_BOXES = 2;
+
+    /** 2 columns (left/right) x 3 depth rows (near/mid/far) = 6 boxes total. */
+    private static final int NUM_COLS = 2;
+    private static final int NUM_ROWS = 3;
+    private static final double ROW_DEPTH_CM = (BOX_FAR_EDGE_CM - DEAD_ZONE_CM) / NUM_ROWS;
 
     // ---- filtering ----
     private static final double MIN_RANGE_CM       = TABLE_TEST ? 20.0 : 45.0;  // closer = noise / dead-zone object
     private static final double MAX_RANGE_CM       = TABLE_TEST ? 70.0 : 130.0; // longest legal slant range + margin
-    private static final double HYSTERESIS_CM      = TABLE_TEST ? 3.0 : 5.0;    // sticky column boundary (in x)
+    private static final double HYSTERESIS_CM      = TABLE_TEST ? 3.0 : 5.0;    // sticky boundary, both axes
     private static final double FIELD_TOLERANCE_CM = TABLE_TEST ? 8.0 : 15.0;   // slack on field-edge validation
 
     private final int outputWidthPx;
     private final int outputHeightPx;
 
-    /** Box the player was last classified into (-1 = unknown), used for hysteresis. */
-    private int currentBox = -1;
+    /**
+     * Column/row the player was last classified into (-1 = unknown), used for
+     * hysteresis and read by the game's hit-check ping. volatile because the
+     * UDP reader thread writes these (via parseLine/triangulate) while the
+     * Swing timer thread reads them.
+     */
+    private volatile int currentColumn = -1;
+    private volatile int currentRow = -1;
 
     /** Human-readable description of the latest position fix, for the on-screen demo readout. */
     private String lastFixDescription = "fix: --";
@@ -131,6 +148,24 @@ public class SensorInputBridge {
 
     public String getLastFixDescription() {
         return lastFixDescription;
+    }
+
+    /** Column the player is currently classified into (0..NUM_COLS-1), or -1 if no fix yet. */
+    public int getCurrentColumn() {
+        return currentColumn;
+    }
+
+    /** Depth row the player is currently classified into (0..NUM_ROWS-1, 0 = nearest), or -1 if no fix yet. */
+    public int getCurrentRow() {
+        return currentRow;
+    }
+
+    /** Combined index (row * NUM_COLS + col), matching GamePanel's mole list ordering. -1 if no fix. */
+    public int getCurrentCellIndex() {
+        if (currentColumn < 0 || currentRow < 0) {
+            return -1;
+        }
+        return currentRow * NUM_COLS + currentColumn;
     }
 
     public Point parseLine(String line) {
@@ -221,26 +256,52 @@ public class SensorInputBridge {
             return null;
         }
 
-        int box = (x < COLUMN_BOUNDARY_CM) ? 0 : 1;
-        // sticky boundary: inside the +/- hysteresis band, keep the current box
-        if (currentBox >= 0 && box != currentBox
-                && Math.abs(x - COLUMN_BOUNDARY_CM) < HYSTERESIS_CM) {
-            box = currentBox;
-        }
-        currentBox = box;
-        lastFixDescription = String.format("fix: x=%.0fcm y=%.0fcm (triangulated) -> Box %d", x, y, box + 1);
-        return mapBoxToBoard(box);
+        int col = classifyColumn(x);
+        int row = classifyRow(y);
+        lastFixDescription = String.format("fix: x=%.0fcm y=%.0fcm (triangulated) -> Col %d Row %d",
+                x, y, col, row);
+        return mapCellToBoard(col, row);
     }
 
     /**
      * Only one sensor sees the player: the player must be inside that
-     * sensor's beam, i.e. on that sensor's side of the field.
+     * sensor's beam, i.e. on that sensor's side of the field. Depth row is
+     * approximated from that sensor's raw range (only exact when the player
+     * is directly in front of it, since range is a slant distance).
      */
     private Point singleEcho(int sensorIndex, double range) {
-        int box = sensorIndex; // S1 -> box 1 (left), S2 -> box 2 (right)
-        currentBox = box;
-        lastFixDescription = String.format("fix: S%d only, r=%.0fcm -> Box %d", sensorIndex + 1, range, box + 1);
-        return mapBoxToBoard(box);
+        int col = sensorIndex; // S1 -> col 0 (left), S2 -> col 1 (right)
+        currentColumn = col;
+        int row = classifyRow(range);
+        lastFixDescription = String.format("fix: S%d only, r=%.0fcm -> Col %d Row %d",
+                sensorIndex + 1, range, col, row);
+        return mapCellToBoard(col, row);
+    }
+
+    /** Classifies x into a column with a sticky boundary so small jitter near the split doesn't flicker. */
+    private int classifyColumn(double x) {
+        int col = (x < COLUMN_BOUNDARY_CM) ? 0 : 1;
+        if (currentColumn >= 0 && col != currentColumn
+                && Math.abs(x - COLUMN_BOUNDARY_CM) < HYSTERESIS_CM) {
+            col = currentColumn;
+        }
+        currentColumn = col;
+        return col;
+    }
+
+    /** Classifies depth y into a row (0 = nearest the sensors) with the same sticky-boundary treatment. */
+    private int classifyRow(double y) {
+        double depthIntoField = y - DEAD_ZONE_CM;
+        int row = clampInt((int) Math.floor(depthIntoField / ROW_DEPTH_CM), 0, NUM_ROWS - 1);
+
+        if (currentRow >= 0 && row != currentRow) {
+            double nearestBoundary = Math.round(depthIntoField / ROW_DEPTH_CM) * ROW_DEPTH_CM;
+            if (Math.abs(depthIntoField - nearestBoundary) < HYSTERESIS_CM) {
+                row = currentRow;
+            }
+        }
+        currentRow = row;
+        return row;
     }
 
     /** Returns the range if it's inside the plausible window, else null. */
@@ -263,15 +324,16 @@ public class SensorInputBridge {
         }
     }
 
-    /** The board is one row of NUM_BOXES cells: box index picks the cell. */
-    private Point mapBoxToBoard(int box) {
-        int cellWidth = outputWidthPx / NUM_BOXES;
-        int x = clamp(box * cellWidth + cellWidth / 2, 0, outputWidthPx - 1);
-        int y = outputHeightPx / 2;
+    /** Maps a (column, row) cell to the pixel centre of that cell. Row 0 renders at the top. */
+    private Point mapCellToBoard(int col, int row) {
+        int cellWidth = outputWidthPx / NUM_COLS;
+        int cellHeight = outputHeightPx / NUM_ROWS;
+        int x = clampInt(col * cellWidth + cellWidth / 2, 0, outputWidthPx - 1);
+        int y = clampInt(row * cellHeight + cellHeight / 2, 0, outputHeightPx - 1);
         return new Point(x, y);
     }
 
-    private int clamp(int value, int min, int max) {
+    private int clampInt(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
