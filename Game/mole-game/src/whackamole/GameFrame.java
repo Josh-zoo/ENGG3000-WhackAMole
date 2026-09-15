@@ -29,7 +29,7 @@ public class GameFrame extends JFrame {
 
     private final JLabel scoreLabel = new JLabel("SCORE 0000");
     private final JLabel levelLabel = new JLabel("LVL 1");
-    private final JLabel timeLabel = new JLabel("TIME 60");
+    private final JLabel timeLabel = new JLabel("TIME 30");
     private final JButton startButton = new JButton("START");
 
     public GameFrame() {

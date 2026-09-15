@@ -5,6 +5,8 @@ import javax.swing.Timer;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -72,15 +74,21 @@ public class GamePanel extends JPanel {
     private static final Color SUN_COLOR = new Color(255, 221, 89);
     private static final Color TIMER_BAR_BG = new Color(40, 30, 20);
     private static final Color TIMER_BAR_FILL = new Color(255, 215, 0);
+    private static final Color OVERLAY_TINT = new Color(0, 0, 0, 165);
+    private static final Font OVERLAY_TITLE_FONT = new Font(Font.MONOSPACED, Font.BOLD, 24);
+    private static final Font OVERLAY_TEXT_FONT = new Font(Font.MONOSPACED, Font.BOLD, 14);
 
     // ---- timing --------------------------------------------------------------
-    private static final int GAME_DURATION_MS = 60_000; // one round = 60 seconds
+    private static final int LEVEL_DURATION_MS = 30_000; // fresh timer at the start of each level
     private static final int FRAME_DELAY_MS = 16;         // ~60 fps game loop
     private static final long POP_ANIM_MS = 110;           // rise animation duration
     private static final long SINK_ANIM_MS = 140;          // sink animation duration
     private static final int RISE_DISTANCE = 42;            // vertical travel, in px
     private static final int TIMER_BAR_WIDTH = 90;
     private static final int TIMER_BAR_HEIGHT = 6;
+    private static final long HOVER_HOLD_MS = 1500;   // how long to hover the button to continue
+    private static final int CONTINUE_BTN_W = 220;
+    private static final int CONTINUE_BTN_H = 50;
 
 
     private final List<Mole> moles = new ArrayList<>();
@@ -99,6 +107,9 @@ public class GamePanel extends JPanel {
     private long nextSpawnAtMs = 0;
     private long roundEndAtMs = 0;
     private boolean running = false;
+
+    private boolean intermissionActive = false;
+    private long intermissionHoverStartMs = -1;
 
     public GamePanel() {
         boardWidth = GRID_COLS * CELL_W + (GRID_COLS - 1) * CELL_GAP;
@@ -129,14 +140,14 @@ public class GamePanel extends JPanel {
         levelManager.reset();
 
         long now = System.currentTimeMillis();
-        roundEndAtMs = now + GAME_DURATION_MS;
+        roundEndAtMs = now + LEVEL_DURATION_MS;
         scheduleNextSpawn(now);
         running = true;
         loopTimer.start();
 
         fireScoreChanged();
         fireLevelChanged();
-        fireTimeChanged(GAME_DURATION_MS);
+        fireTimeChanged(LEVEL_DURATION_MS);
     }
 
     public void stopGame() {
@@ -187,24 +198,30 @@ public class GamePanel extends JPanel {
     // ---- game loop -----------------------------------------------------------
 
     private void tick() {
-        if (!running) return;
-        long now = System.currentTimeMillis();
+    if (!running) return;
+    long now = System.currentTimeMillis();
 
-        if (now >= roundEndAtMs) {
-            int finalScore = score;
-            stopGame();
-            fireGameOver(finalScore);
-            return;
-        }
-        fireTimeChanged((int) Math.max(0, roundEndAtMs - now));
-
-        Level level = levelManager.getCurrentLevel();
-        maybeSpawnMole(now, level);
-        resolveExpiredMoles(now, level);
-        finalizeSinkingMoles(now);
-
+    if (intermissionActive) {
+        updateIntermission(now);
         repaint();
+        return; // spawning, scoring, and the round clock are all frozen during intermission
     }
+
+    if (now >= roundEndAtMs) {
+        int finalScore = score;
+        stopGame();
+        fireGameOver(finalScore);
+        return;
+    }
+    fireTimeChanged((int) Math.max(0, roundEndAtMs - now));
+
+    Level level = levelManager.getCurrentLevel();
+    maybeSpawnMole(now, level);
+    resolveExpiredMoles(now, level);
+    finalizeSinkingMoles(now);
+
+    repaint();
+}
 
     private void maybeSpawnMole(long now, Level level) {
         long visibleCount = moles.stream().filter(Mole::isVisible).count();
@@ -219,21 +236,60 @@ public class GamePanel extends JPanel {
         }
     }
 
-    private void resolveExpiredMoles(long now, Level level) {
-        for (Mole mole : moles) {
-            if (mole.isExpired(now) && !mole.isResolved()) {
-                if (mole.contains(mousePoint)) {
-                    score += level.getPointsPerHit();
-                    fireScoreChanged();
-                    if (levelManager.maybeAdvance(score)) {
-                        fireLevelChanged();
-                    }
+private void resolveExpiredMoles(long now, Level level) {
+    for (Mole mole : moles) {
+        if (mole.isExpired(now) && !mole.isResolved()) {
+            if (mole.contains(mousePoint)) {
+                score += level.getPointsPerHit();
+                fireScoreChanged();
+                if (levelManager.maybeAdvance(score)) {
+                    fireLevelChanged();
+                    mole.markResolved();
+                    mole.hide();
+                    enterIntermission(now);
+                    return; // board is pausing — don't touch any other mole this tick
                 }
-                mole.markResolved();
-                mole.startSinking(now); // animate back down instead of vanishing instantly
             }
+            mole.markResolved();
+            mole.startSinking(now); // animate back down instead of vanishing instantly
         }
     }
+}
+
+private void enterIntermission(long now) {
+    intermissionActive = true;
+    intermissionHoverStartMs = -1;
+    for (Mole m : moles) {
+        m.hide();
+    }
+}
+
+private void updateIntermission(long now) {
+    Rectangle btn = continueButtonBounds();
+    if (btn.contains(mousePoint)) {
+        if (intermissionHoverStartMs < 0) {
+            intermissionHoverStartMs = now;
+        } else if (now - intermissionHoverStartMs >= HOVER_HOLD_MS) {
+            exitIntermission(now);
+        }
+    } else {
+        intermissionHoverStartMs = -1;
+    }
+}
+
+private void exitIntermission(long now) {
+    roundEndAtMs = now + LEVEL_DURATION_MS; // fresh full timer for the new level
+    intermissionActive = false;
+    intermissionHoverStartMs = -1;
+    scheduleNextSpawn(now);
+    fireTimeChanged(LEVEL_DURATION_MS);
+}
+
+private Rectangle continueButtonBounds() {
+    int x = (getWidth() - CONTINUE_BTN_W) / 2;
+    int y = (getHeight() - CONTINUE_BTN_H) / 2 + 30;
+    return new Rectangle(x, y, CONTINUE_BTN_W, CONTINUE_BTN_H);
+}
 
     private void finalizeSinkingMoles(long now) {
         for (Mole mole : moles) {
@@ -276,6 +332,10 @@ public class GamePanel extends JPanel {
                 drawPoppedMole(g2, mole, cell, holeOpeningY, now);
                 drawTimerBar(g2, cell, mole, now);
             }
+        }
+
+        if (intermissionActive) {
+            drawIntermissionOverlay(g2, now);
         }
     }
 
@@ -384,6 +444,48 @@ public class GamePanel extends JPanel {
 
         g2.setColor(MOLE_OUTLINE);
         g2.drawRect(barX, barY, TIMER_BAR_WIDTH, TIMER_BAR_HEIGHT);
+    }
+
+    /** Dims the board and shows a "level complete, hover to continue" prompt. */
+    private void drawIntermissionOverlay(Graphics2D g2, long now) {
+        g2.setColor(OVERLAY_TINT);
+        g2.fillRect(BORDER, BORDER, boardWidth, boardHeight);
+
+        int centerX = getWidth() / 2;
+        int completedLevel = levelManager.getCurrentLevel().getNumber() - 1;
+
+        g2.setFont(OVERLAY_TITLE_FONT);
+        g2.setColor(Color.WHITE);
+        drawCenteredString(g2, "LEVEL " + completedLevel + " COMPLETE!", centerX, BORDER + SKY_HEIGHT + 60);
+
+        g2.setFont(OVERLAY_TEXT_FONT);
+        g2.setColor(SUN_COLOR);
+        drawCenteredString(g2, "GOOD JOB! HOVER OVER THE BUTTON BELOW", centerX, BORDER + SKY_HEIGHT + 92);
+        drawCenteredString(g2, "TO START LEVEL " + levelManager.getCurrentLevel().getNumber(), centerX, BORDER + SKY_HEIGHT + 112);
+
+        Rectangle btn = continueButtonBounds();
+        double hoverProgress = 0;
+        if (intermissionHoverStartMs >= 0) {
+            hoverProgress = Math.min(1.0, (now - intermissionHoverStartMs) / (double) HOVER_HOLD_MS);
+        }
+
+        g2.setColor(TIMER_BAR_BG);
+        g2.fillRect(btn.x, btn.y, btn.width, btn.height);
+        int fillW = (int) Math.round(btn.width * hoverProgress);
+        g2.setColor(SUN_COLOR);
+        g2.fillRect(btn.x, btn.y, fillW, btn.height);
+        g2.setColor(MOLE_OUTLINE);
+        g2.drawRect(btn.x, btn.y, btn.width, btn.height);
+        g2.drawRect(btn.x + 1, btn.y + 1, btn.width - 2, btn.height - 2);
+
+        g2.setFont(OVERLAY_TEXT_FONT);
+        g2.setColor(hoverProgress > 0.5 ? Color.BLACK : Color.WHITE);
+        drawCenteredString(g2, "CONTINUE", btn.x + btn.width / 2, btn.y + btn.height / 2 + 5);
+    }
+
+    private void drawCenteredString(Graphics2D g2, String text, int centerX, int baselineY) {
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(text, centerX - fm.stringWidth(text) / 2, baselineY);
     }
 
     private void drawMoleSprite(Graphics2D g2, int originX, int originY) {

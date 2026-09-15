@@ -4,9 +4,10 @@ import java.awt.Point;
 
 /**
  * Represents a single hole on the board. A Mole only knows about its own
- * position/size and its lifecycle (hidden -> visible -> expired) — it knows
- * nothing about scoring or game rules, which keeps it easy to reuse or test
- * in isolation.
+ * position/size and its lifecycle (hidden -> visible -> expired), plus a
+ * couple of small animation timers for popping up and sinking back down.
+ * It knows nothing about scoring or game rules, which keeps it easy to
+ * reuse or test in isolation.
  */
 public class Mole {
 
@@ -38,16 +39,17 @@ public class Mole {
         this.hideStartMs = -1;
     }
 
-    public boolean isVisible() {
-        return visible;
-    }
-
-    public void startSinking(long nowMS) {
-        this.hideStartMs = nowMS;
+    /** Begins the "sinking back into the hole" animation. Still visible until hide() is called. */
+    public void startSinking(long nowMs) {
+        this.hideStartMs = nowMs;
     }
 
     public boolean isSinking() {
         return hideStartMs >= 0;
+    }
+
+    public boolean isVisible() {
+        return visible;
     }
 
     /** True once this mole's up-time has run out (whether or not it's been handled yet). */
@@ -63,19 +65,25 @@ public class Mole {
         resolved = true;
     }
 
-    
+    /**
+     * Combined 0..1 "how popped up" factor: rises from 0 to 1 over
+     * risingAnimMs right after popUp(), then — once startSinking() is
+     * called — falls back from 1 to 0 over sinkingAnimMs. Rendering code
+     * uses this single number to position and clip the mole sprite so it
+     * looks like it's emerging from / sinking into its hole.
+     */
     public double popFraction(long nowMs, long risingAnimMs, long sinkingAnimMs) {
-    if (isSinking()) {
-        if (sinkingAnimMs <= 0) return 0;
-        double t = (nowMs - hideStartMs) / (double) sinkingAnimMs;
-        return 1 - Math.max(0, Math.min(1, t));
+        if (isSinking()) {
+            if (sinkingAnimMs <= 0) return 0;
+            double t = (nowMs - hideStartMs) / (double) sinkingAnimMs;
+            return 1 - Math.max(0, Math.min(1, t));
+        }
+        if (!visible || risingAnimMs <= 0) return visible ? 1 : 0;
+        double t = (nowMs - popTimeMs) / (double) risingAnimMs;
+        return Math.max(0, Math.min(1, t));
     }
-    if (!visible || risingAnimMs <= 0) return visible ? 1 : 0;
-    double t = (nowMs - popTimeMs) / (double) risingAnimMs;
-    return Math.max(0, Math.min(1, t));
-}
 
-/** 0..1 fraction of up-time remaining — 1 = just popped up, 0 = about to expire or sinking. */
+    /** 0..1 fraction of up-time remaining — 1 = just popped up, 0 = about to expire or sinking. */
     public double remainingFraction(long nowMs) {
         if (!visible || isSinking() || upDurationMs <= 0) return 0;
         double remaining = upDurationMs - (nowMs - popTimeMs);
