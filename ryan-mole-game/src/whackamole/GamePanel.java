@@ -1,6 +1,8 @@
 package whackamole;
 
 import javax.swing.JPanel;
+import javax.swing.KeyStroke;
+import javax.swing.AbstractAction;
 import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -10,38 +12,33 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Font;
-import java.awt.event.MouseMotionAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.event.ActionEvent;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Random;
 import java.awt.Toolkit;
+
 /**
  * The game board: draws the holes/moles, tracks the player's sensor-derived
- * box, and runs the spawn/score loop.
+ * position, and runs the spawn/score loop.
  *
  * Scoring rule: a mole is a hit the instant the player's tracked (column,
  * row) box matches the mole's box. That match is checked on a fixed-interval
  * "ping" (see pingTimer / PING_INTERVAL_MS below), decoupled from the ~60fps
- * render loop, so scoring cadence matches how often the sensors actually
- * produce a new position fix rather than firing every frame. A mole that
- * expires without ever being matched is simply a miss.
+ * render loop.
  *
- * To extend the game (new mole types, power-ups, a pause feature, etc.) this
- * is the file you'll touch — but the grid layout, rendering, input handling,
- * and level/scoring logic are already split into separate, fairly small
- * methods so changes stay localized.
+ * V2 tracking display: the cursor now sits at the player's actual solved
+ * (x, y) instead of snapping to a box centre, and every fix leaves a dot that
+ * fades out over TRAIL_LIFETIME_MS. Moving produces a fading "snake", which
+ * makes the multilateration visible to an audience. Press T to hide/show it.
  */
 public class GamePanel extends JPanel {
 
-    // 2 columns x 3 depth rows = 6 boxes, matching the physical rig: a field
-    // split left/right by the triangulated x, and near/mid/far by the
-    // triangulated y (see SensorInputBridge). Moles are laid out row-major
-    // (row 0 first), so mole list index i corresponds to row = i / GRID_COLS,
-    // col = i % GRID_COLS — this must stay in sync with SensorInputBridge's
-    // own NUM_COLS/NUM_ROWS.
-    private static final int GRID_ROWS = 3;
-    private static final int GRID_COLS = 2;
+    // Grid comes from the bridge so the two can never disagree.
+    private static final int GRID_ROWS = SensorInputBridge.NUM_ROWS;
+    private static final int GRID_COLS = SensorInputBridge.NUM_COLS;
     private static final int HOLE_DIAMETER = 140;
     private static final int HOLE_GAP = 30;
     private static final int BOARD_WIDTH_PX = GRID_COLS * HOLE_DIAMETER + (GRID_COLS + 1) * HOLE_GAP;
@@ -49,12 +46,18 @@ public class GamePanel extends JPanel {
     private static final int GAME_DURATION_MS = 60_000; // one round = 60 seconds
     private static final int FRAME_DELAY_MS = 16;        // ~60 fps game loop
 
-    // Live position ping: how often we check the player's current box against
-    // active moles. 150ms matches the sensor pair's own fire rate (each
-    // sensor fires with a ~60ms gap between them, so a full two-sensor fix
-    // lands every ~120-150ms) — polling faster than that would just re-check
-    // the same reading.
+    // Hit check cadence. The hub sends a packet roughly every 170-220 ms, so
+    // checking every 150 ms never misses a fix and never double-counts much.
     private static final int PING_INTERVAL_MS = 150;
+
+    // ---- snake trail ----
+    private static final int TRAIL_POLL_MS = 100;       // checks for a new fix; one dot per real fix
+    private static final int TRAIL_LIFETIME_MS = 3000;  // how long a dot takes to fade out
+    private static final int TRAIL_MAX_POINTS = 40;
+    private static final Color TRAIL_MULTI = new Color(0, 255, 140);
+    private static final Color TRAIL_SINGLE = new Color(255, 180, 0);
+
+    private record TrailPoint(double xCm, double yCm, boolean multilaterated, long bornAtMs) {}
 
     private final List<Mole> moles = new ArrayList<>();
     private final List<GameListener> listeners = new ArrayList<>();
@@ -62,62 +65,79 @@ public class GamePanel extends JPanel {
     private final LevelManager levelManager = new LevelManager();
     private final Timer loopTimer;
     private final Timer pingTimer;
-    private final SensorInputBridge sensorInputBridge = new SensorInputBridge(BOARD_WIDTH_PX, BOARD_HEIGHT_PX, 60.0);
+    private final Timer trailTimer;
+    private final SensorInputBridge sensorInputBridge = new SensorInputBridge();
     private final UdpSensorReader udpSensorReader;
+    private final SensorSimulator simulator;
 
-    private Point mousePoint = new Point(-1, -1);
+    private final Deque<TrailPoint> trail = new ArrayDeque<>();
+    private long lastTrailSeq = -1;
+    private boolean showTrail = true;
+
     private String sensorCellLabel = "Cell: --";
-    private String sensorDebugLabel = "Wireless: waiting...";
-    private boolean inDeadZone = false;         //DeadZone
-    private boolean previousDeadZone = false;   //DeadZone
+    private volatile String sensorDebugLabel = "Wireless: waiting...";
+    private boolean previousDeadZone = false;
     private int score = 0;
     private long nextSpawnAtMs = 0;
     private long roundEndAtMs = 0;
     private boolean running = false;
 
     public GamePanel() {
+        this(false);
+    }
+
+    /** @param simulate true = generate fake sensor packets instead of listening on UDP (no hardware needed). */
+    public GamePanel(boolean simulate) {
         setPreferredSize(new Dimension(BOARD_WIDTH_PX, BOARD_HEIGHT_PX));
         setBackground(new Color(94, 61, 30));
 
         loopTimer = new Timer(FRAME_DELAY_MS, e -> tick());
         pingTimer = new Timer(PING_INTERVAL_MS, e -> checkForHit());
+        trailTimer = new Timer(TRAIL_POLL_MS, e -> updateTrail());
         layoutHoles();
 
-        udpSensorReader = new UdpSensorReader(this::handleSensorLine);
-        udpSensorReader.start();
+        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke('t'), "toggleTrail");
+        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke('T'), "toggleTrail");
+        getActionMap().put("toggleTrail", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                showTrail = !showTrail;
+                repaint();
+            }
+        });
+
+        if (simulate) {
+            udpSensorReader = null;
+            simulator = new SensorSimulator(this::handleSensorLine);
+            simulator.start();
+        } else {
+            simulator = null;
+            udpSensorReader = new UdpSensorReader(this::handleSensorLine);
+            udpSensorReader.start();
+        }
+        trailTimer.start(); // runs outside rounds too, so tracking can be shown on its own
     }
 
     public void addGameListener(GameListener listener) {
         listeners.add(listener);
     }
 
-    public void setSensorPosition(Point point) {
-        sensorInputBridge.updatePosition(point.x, point.y);
-    }
-
-
+    /** Called on the UDP (or simulator) thread for every packet. */
     public void handleSensorLine(String line) {
         sensorDebugLabel = "Wireless: " + line;
-        Point point = sensorInputBridge.parseLine(line);
+        sensorInputBridge.accept(line);
+        javax.swing.SwingUtilities.invokeLater(this::onBridgeUpdated);
+    }
 
-        if (point != null) {
-            mousePoint = point;
-            sensorCellLabel = describeCell();
+    private void onBridgeUpdated() {
+        sensorCellLabel = describeCell();
 
-        updateDeadZone(point);
+        boolean inDeadZone = sensorInputBridge.isInDeadZone();
+        if (inDeadZone && !previousDeadZone) {
+            Toolkit.getDefaultToolkit().beep();
         }
-
-    repaint();
-    }
-
-    private void updateDeadZone(Point point) {
-    inDeadZone = isDeadZone(point);
-
-    if (inDeadZone && !previousDeadZone) {
-        Toolkit.getDefaultToolkit().beep();
-    }
-
-    previousDeadZone = inDeadZone;
+        previousDeadZone = inDeadZone;
+        repaint();
     }
 
     public void startGame() {
@@ -158,6 +178,36 @@ public class GamePanel extends JPanel {
                 moles.add(new Mole(x, y, HOLE_DIAMETER));
             }
         }
+    }
+
+    // ---- snake trail -------------------------------------------------------
+
+    /** Adds a dot only when the bridge has produced a NEW fix, then drops dots that have fully faded. */
+    private void updateTrail() {
+        long now = System.currentTimeMillis();
+        SensorInputBridge.Fix fix = sensorInputBridge.getLatestFix();
+        if (fix != null && fix.seq != lastTrailSeq) {
+            lastTrailSeq = fix.seq;
+            trail.addLast(new TrailPoint(fix.xCm, fix.yCm,
+                    fix.kind == SensorInputBridge.Kind.MULTILATERATED, fix.timeMs));
+            while (trail.size() > TRAIL_MAX_POINTS) trail.removeFirst();
+        }
+        while (!trail.isEmpty() && now - trail.peekFirst().bornAtMs() > TRAIL_LIFETIME_MS) {
+            trail.removeFirst();
+        }
+        if (!running) repaint(); // the game loop repaints while a round is on
+    }
+
+    /** Field cm -> board px. x spans the field width; y spans the playable depth (row 0 at the top). */
+    private static Point toBoard(double xCm, double yCm) {
+        double fx = (xCm - SensorInputBridge.FIELD_MIN_X_CM)
+                / (SensorInputBridge.FIELD_MAX_X_CM - SensorInputBridge.FIELD_MIN_X_CM);
+        double fy = (yCm - SensorInputBridge.DEAD_ZONE_CM)
+                / (SensorInputBridge.FIELD_FAR_CM - SensorInputBridge.DEAD_ZONE_CM);
+        int px = (int) Math.round(fx * BOARD_WIDTH_PX);
+        int py = (int) Math.round(fy * BOARD_HEIGHT_PX);
+        return new Point(Math.max(0, Math.min(BOARD_WIDTH_PX - 1, px)),
+                Math.max(0, Math.min(BOARD_HEIGHT_PX - 1, py)));
     }
 
     // ---- game loop ---------------------------------------------------------
@@ -204,7 +254,7 @@ public class GamePanel extends JPanel {
 
         int col = sensorInputBridge.getCurrentColumn();
         int row = sensorInputBridge.getCurrentRow();
-        if (col < 0 || row < 0) return; // no valid fix yet — nothing to check
+        if (col < 0 || row < 0) return; // no fix yet, or standing in the dead zone
 
         for (int i = 0; i < moles.size(); i++) {
             Mole mole = moles.get(i);
@@ -251,17 +301,6 @@ public class GamePanel extends JPanel {
     }
 
     // ---- rendering ---------------------------------------------------------
-    private boolean isDeadZone(Point point)
-    {
-        if (point == null)
-        {
-            return false;
-        }
-
-        //Prototype
-        // Top 50 pixels of our board represent the dead zone
-        return point.y < 50;
-    }
 
     @Override
     protected void paintComponent(Graphics g) {
@@ -277,19 +316,63 @@ public class GamePanel extends JPanel {
             }
         }
 
-        drawCursor(g2, mousePoint);
+        if (showTrail) {
+            drawTrail(g2, now);
+        }
+        SensorInputBridge.Fix fix = sensorInputBridge.getLatestFix();
+        if (fix != null) {
+            drawCursor(g2, toBoard(fix.xCm, fix.yCm));
+        }
+
         drawSensorLabel(g2, sensorCellLabel);
         drawSerialLabel(g2, sensorDebugLabel);
         drawFixLabel(g2, sensorInputBridge.getLastFixDescription());
+        drawTrailLegend(g2);
 
-        if (inDeadZone) {
+        if (sensorInputBridge.isInDeadZone()) {
             drawDeadZoneWarning(g2);
         }
     }
 
-    private void drawDeadZoneWarning(Graphics2D g2)
-    {
-        g2.setColor(new Color(220, 0,0, 180));
+    /** Oldest dots first so newer ones paint on top. Alpha and size both shrink with age. */
+    private void drawTrail(Graphics2D g2, long now) {
+        TrailPoint prev = null;
+        for (TrailPoint tp : trail) {
+            double life = 1.0 - (now - tp.bornAtMs()) / (double) TRAIL_LIFETIME_MS;
+            if (life <= 0) { prev = tp; continue; }
+            int alpha = (int) Math.round(230 * life);
+            Color base = tp.multilaterated() ? TRAIL_MULTI : TRAIL_SINGLE;
+            Point p = toBoard(tp.xCm(), tp.yCm());
+
+            if (prev != null) {
+                Point q = toBoard(prev.xCm(), prev.yCm());
+                g2.setStroke(new BasicStroke(2f));
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha / 3));
+                g2.drawLine(q.x, q.y, p.x, p.y);
+            }
+
+            int r = (int) Math.round(3 + 5 * life);
+            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
+            g2.fillOval(p.x - r, p.y - r, 2 * r, 2 * r);
+            prev = tp;
+        }
+    }
+
+    private void drawTrailLegend(Graphics2D g2) {
+        g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        int y = BOARD_HEIGHT_PX - 8;
+        g2.setColor(TRAIL_MULTI);
+        g2.fillOval(10, y - 8, 8, 8);
+        g2.setColor(new Color(230, 230, 230));
+        g2.drawString("multilaterated", 22, y);
+        g2.setColor(TRAIL_SINGLE);
+        g2.fillOval(112, y - 8, 8, 8);
+        g2.setColor(new Color(230, 230, 230));
+        g2.drawString("single echo    T = trail " + (showTrail ? "on" : "off"), 124, y);
+    }
+
+    private void drawDeadZoneWarning(Graphics2D g2) {
+        g2.setColor(new Color(220, 0, 0, 180));
         g2.fillRect(0, 0, getWidth(), 35);
 
         g2.setColor(Color.WHITE);
@@ -349,16 +432,16 @@ public class GamePanel extends JPanel {
     }
 
     private void drawSerialLabel(Graphics2D g2, String label) {
-        g2.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        g2.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 10));
         g2.setColor(new Color(220, 220, 220));
         g2.drawString(label, 10, 38);
     }
 
-    /** Live triangulation readout — shows the computed (x, y) for the demo. */
+    /** Live multilateration readout: computed (x, y), sensors used, residual. */
     private void drawFixLabel(Graphics2D g2, String label) {
-        g2.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        g2.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 10));
         g2.setColor(new Color(140, 235, 255));
-        g2.drawString(label, 10, 56);
+        g2.drawString(label, 10, 54);
     }
 
     /** Reads column/row straight from the bridge, so this always agrees with checkForHit(). */

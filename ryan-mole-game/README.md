@@ -1,3 +1,53 @@
+# V2: 4-sensor multilateration + live tracking trail
+
+Full scale: 1.5 m x 1.5 m playing area starting 50 cm from the wall (the
+first 50 cm is the alarm dead zone), split into a 3 x 3 grid of 50 cm boxes.
+
+Sensor placement (origin = wall line at the left edge of the playing area):
+
+| Sensor | x along wall | Aim (turned toward the middle) |
+|---|---|---|
+| S1 (hub box, outer) | 0 cm | 15 deg |
+| S2 (hub box, inner) | 10 cm | 40 deg |
+| S3 (node box, inner) | 140 cm | 40 deg |
+| S4 (node box, outer) | 150 cm | 15 deg |
+
+All four at the same height, roughly chest height (about 1.1 to 1.2 m),
+level, flush against the wall.
+
+Works with the hub + node firmware (`SensorF_WiFi.ino` + `SensorF_Node.ino`),
+packet format `Seq:..|Time:..|S1:..|S2:..|S3:..|S4:..`. The old
+`Sensor 1: .. Sensor 2: ..` packet still parses.
+
+What changed:
+
+- `SensorInputBridge` solves position from **any** set of sensors that echo:
+  seed from the widest-baseline pair (Saim's closed form, generalised), refine
+  by least squares over all valid ranges, drop a range that disagrees with the
+  rest (crosstalk), and reject one-packet "teleports".
+- Cursor sits at the real solved (x, y) instead of snapping to a box centre.
+- **Snake trail**: every fix leaves a dot that fades over 3 s. Green = proper
+  multilateration, amber = single-echo guess. Press **T** to hide/show.
+- Proximity alarm runs on raw ranges (any sensor under 50 cm), so it fires
+  even when the player is too close for a clean fix. No box scores while in
+  the dead zone.
+- `--sim` flag: fake hub packets (noise, dropouts, crosstalk), no hardware and
+  no UDP socket, so it can run next to the real game.
+
+**Before using with real hardware**, measure the transducer centres and aim
+angles and edit `SENSOR_X_CM`, `SENSOR_Y_CM` and `SENSOR_AIM_DEG` at the top
+of `SensorInputBridge`.
+
+Run:
+
+```bash
+cd ryan-mole-game
+javac -d out src/whackamole/*.java test/whackamole/*.java
+java -cp out whackamole.MultilaterationTest   # 19 checks + accuracy table
+java -cp out whackamole.Main --sim            # no hardware
+java -cp out whackamole.Main                  # real sensors over UDP 4210
+```
+
 # Whack-a-Mole Wireless Sensor Demo
 
 This project is currently set up as a wireless proof-of-concept.
