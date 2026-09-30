@@ -24,11 +24,15 @@ public class GameFrame extends JFrame {
 
     private final JButton stopButton = new JButton("Stop");
     public GameFrame() {
-        super("Whack-a-Mole");
+        this(false);
+    }
+
+    public GameFrame(boolean simulate) {
+        super(simulate ? "Whack-a-Mole (SIMULATED SENSORS)" : "Whack-a-Mole");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
-        GamePanel gamePanel = new GamePanel();
+        GamePanel gamePanel = new GamePanel(simulate);
 
         Font labelFont = new Font(Font.SANS_SERIF, Font.BOLD, 14);
         scoreLabel.setFont(labelFont);
