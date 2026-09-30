@@ -31,10 +31,18 @@ typedef struct struct_message {
 struct_message incomingReadings;
 
 // ESP-NOW Receive Callback
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
-  remoteDist3 = incomingReadings.distance3;
-  remoteDist4 = incomingReadings.distance4;
+//void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  //memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+  //remoteDist3 = incomingReadings.distance3;
+  //remoteDist4 = incomingReadings.distance4;
+//}
+
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+
+    memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+
+    remoteDist3 = incomingReadings.distance3;
+    remoteDist4 = incomingReadings.distance4;
 }
 
 float measureDistanceCM(int trigPin, int echoPin) {
@@ -97,6 +105,9 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWi-Fi connected.");
+
+  Serial.print("WiFi channel = ");
+  Serial.println(WiFi.channel());
   
   // PRINT MAC ADDRESS FOR THE NODE
   Serial.print("HUB MAC ADDRESS: ");
@@ -104,11 +115,18 @@ void setup() {
 
   udp.begin(PC_PORT);
 
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
+  esp_err_t status = esp_now_init();
+
+  Serial.print("ESP-NOW init = ");
+  Serial.println(status);
+
+  if (status != ESP_OK) {
+      Serial.println("Error initializing ESP-NOW");
+      return;
   }
-  esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
+
+  esp_now_register_recv_cb(OnDataRecv);
+  Serial.println("Receive callback registered");
 }
 
 void loop() {
@@ -121,3 +139,17 @@ void loop() {
   
   delay(100);
 }
+
+//void loop() {
+
+   // float d1 = measureDistanceCM(TRIG_PIN_1, ECHO_PIN_1);
+    //float d2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
+
+    //Serial.print("S1 = ");
+    //Serial.print(d1);
+
+    //Serial.print("   S2 = ");
+    //Serial.println(d2);
+
+    //delay(500);
+//}
