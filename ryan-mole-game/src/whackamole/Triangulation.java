@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 public class Triangulation {
 
     private static final double x1 = 0.0;
-    private static final double x2 = 0.08;
+    private static final double x2 = 0.075;
     private static final double x3 = 1.4;
     private static final double x4 = 1.51;
 
@@ -19,12 +19,12 @@ public class Triangulation {
         double d3,
         double d4) {
 
-        double hubSpacing = 0.08;
+        double hubSpacing = x2 - x1;
 
         double xLeft =(d1 * d1 - d2 * d2 + hubSpacing * hubSpacing) / (2 * hubSpacing);
         double yLeft = Math.sqrt(Math.max(0, d1 * d1 - xLeft * xLeft));
 
-       double nodeSpacing = 0.11;
+       double nodeSpacing = x4 - x3;
 
        double xRight =(d3 * d3 - d4 * d4 + x4 * x4 - x3 * x3) / (2 * nodeSpacing);
 

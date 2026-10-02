@@ -3,6 +3,10 @@
 #include <WiFiUdp.h>
 #include <esp_now.h>
 
+#include <WebServer.h>
+
+WebServer server(80);
+
 // Local Sensor Pins
 const int TRIG_PIN_1 = 32;
 const int ECHO_PIN_1 = 33;
@@ -23,6 +27,9 @@ unsigned long sequenceNumber = 0;
 // Remote Sensor Data
 float remoteDist3 = -1.0;
 float remoteDist4 = -1.0;
+
+float localDist1 = -1.0;
+float localDist2 = -1.0;
 
 typedef struct struct_message {
     float distance3;
@@ -84,6 +91,30 @@ void sendSensorValues(float distance1, float distance2, float distance3, float d
   Serial.println(payload);
 }
 
+String sensorText(float value) {
+  if (value < 0)
+    return "No echo";
+  return String(value, 1) + " cm";
+}
+
+void handleRoot() {
+  String page = "<html><head>";
+  page += "<meta http-equiv='refresh' content='0.5'>";
+  page += "</head><body>";
+
+  page += "<h2>ESP32 Sensor Monitor</h2>";
+
+  page += "<p>Sensor 1: " + sensorText(localDist1) + "</p>";
+  page += "<p>Sensor 2: " + sensorText(localDist2) + "</p>";
+  page += "<p>Sensor 3: " + sensorText(remoteDist3) + "</p>";
+  page += "<p>Sensor 4: " + sensorText(remoteDist4) + "</p>";
+
+  page += "</body></html>";
+
+  server.send(200, "text/html", page);
+}
+  
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -96,18 +127,31 @@ void setup() {
   digitalWrite(TRIG_PIN_2, LOW);
 
   // Must be AP_STA for simultaneous Wi-Fi UDP and ESP-NOW
-  WiFi.mode(WIFI_AP_STA); 
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   Serial.print("Connecting to Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
+
+  unsigned long start = millis();
+
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWi-Fi connected.");
 
-  Serial.print("WiFi channel = ");
-  Serial.println(WiFi.channel());
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Wi-Fi connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    server.on("/", handleRoot);
+    server.begin();
+    Serial.println("HTTP server started");
+  } else {
+    Serial.println("Wi-Fi FAILED!");
+  }
   
   // PRINT MAC ADDRESS FOR THE NODE
   Serial.print("HUB MAC ADDRESS: ");
@@ -130,12 +174,13 @@ void setup() {
 }
 
 void loop() {
-  float localDist1 = measureDistanceCM(TRIG_PIN_1, ECHO_PIN_1);
+  localDist1 = measureDistanceCM(TRIG_PIN_1, ECHO_PIN_1);
   delay(60);
-  float localDist2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
+  localDist2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
 
   // Send local + latest remote data
   sendSensorValues(localDist1, localDist2, remoteDist3, remoteDist4);
+  server.handleClient();
   
   delay(100);
 }

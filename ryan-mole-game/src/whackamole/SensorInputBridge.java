@@ -14,6 +14,13 @@ import java.util.regex.Pattern;
  * accepts the old 2-sensor "Sensor 1: .. Sensor 2: .." packet.
  *
  * Geometry and sensor placement: see the constants block below.
+ * 
+ * Sensor positioning pipeline.
+ *
+ * Initial geometric triangulation (two-circle intersection) developed by Saim.
+ * The method was later generalised to operate on any sensor pair and integrated
+ * into this multilateration solver, with least-squares refinement, outlier
+ * rejection, and game integration.
  *
  * How a fix is made:
  *  1. Every valid range is a circle around its sensor.
@@ -47,7 +54,7 @@ public class SensorInputBridge {
     //
     // Index 0 = S1 ... index 3 = S4, matching the packet labels.
     // ---------------------------------------------------------------------
-    public static final double[] SENSOR_X_CM = {0.0, 10.0, 140.0, 150.0};
+    public static final double[] SENSOR_X_CM = {0.0, 7.5, 140.0, 151.0};
     public static final double[] SENSOR_Y_CM = {0.0, 0.0, 0.0, 0.0};
 
     /**
@@ -63,7 +70,7 @@ public class SensorInputBridge {
 
     /** Playing field in front of the sensors, in the same coordinates. */
     public static final double FIELD_MIN_X_CM = 0.0;
-    public static final double FIELD_MAX_X_CM = 150.0;
+    public static final double FIELD_MAX_X_CM = 151.0;
     /** Brief: alarm when the player is within 50 cm of the screen. */
     public static final double DEAD_ZONE_CM = 50.0;
     /** 50 cm dead zone + 150 cm playing depth. */
