@@ -54,6 +54,7 @@ public class SensorInputBridge {
     //
     // Index 0 = S1 ... index 3 = S4, matching the packet labels.
     // ---------------------------------------------------------------------
+
     public static final double[] SENSOR_X_CM = {0.0, 7.5, 140.0, 151.0};
     public static final double[] SENSOR_Y_CM = {0.0, 0.0, 0.0, 0.0};
 
@@ -65,7 +66,7 @@ public class SensorInputBridge {
      * about 99%. The solver maths doesn't use these; they're only used for
      * the single-echo fallback and by the simulator.
      */
-    public static final double[] SENSOR_AIM_DEG = {15.0, 40.0, -40.0, -15.0};
+    public static final double[] SENSOR_AIM_DEG = {25.0, 25.0, -25.0, -25.0};
     public static final double BEAM_HALF_ANGLE_DEG = 15.0;
 
     /** Playing field in front of the sensors, in the same coordinates. */
