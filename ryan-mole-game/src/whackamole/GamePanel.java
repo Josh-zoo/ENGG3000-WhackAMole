@@ -108,9 +108,9 @@ public class GamePanel extends JPanel {
     // Same 16x14 grid, shown briefly right after a successful hit: a hammer
     // crashes down on the mole's head, with a couple of impact sparks.
     private static final String[] MOLE_HIT_SPRITE = {
-        "............DD..",
-        "...HHHHHHHHHH...",
-        "S..HHHHHHHHHH..S",
+        ".S........DD....",
+        ".....HHHHHH.....",
+        "..S..HHHHHH.S...",
         "...oBBBBBBBBo...",
         "..oBBBBBBBBBBo..",
         "..oBBBBBBBBBBo..",

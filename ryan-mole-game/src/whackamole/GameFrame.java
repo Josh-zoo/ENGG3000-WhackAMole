@@ -22,6 +22,10 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.util.Random;
 
 /**
  * Top-level window styled like a retro arcade cabinet, built around three
@@ -115,14 +119,16 @@ public class GameFrame extends JFrame {
     // ---- screens -------------------------------------------------------------
 
     private JPanel buildMenuPanel() {
-        JPanel panel = new JPanel();
-        panel.setBackground(CABINET_BG);
+        JPanel panel = new TitleBackgroundPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(new EmptyBorder(40, 40, 40, 40));
 
-        JLabel title = new JLabel("WHACK-A-MOLE");
+        JLabel title = new JLabel("WhackAMole");
         title.setFont(TITLE_FONT);
         title.setForeground(BUTTON_BG);
+        title.setOpaque(true);
+        title.setBackground(new Color(0, 0, 0, 120));
+        title.setBorder(new EmptyBorder(8, 20, 8, 20));
         title.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         JButton playButton = new JButton("PLAY");
@@ -138,7 +144,7 @@ public class GameFrame extends JFrame {
         rulesButton.setAlignmentX(Component.CENTER_ALIGNMENT);
         rulesButton.addActionListener(e -> cardLayout.show(cards, CARD_RULES));
 
-        panel.add(Box.createVerticalGlue());
+        panel.add(Box.createVerticalStrut(100));
         panel.add(title);
         panel.add(Box.createVerticalStrut(50));
         panel.add(playButton);
@@ -226,6 +232,152 @@ public class GameFrame extends JFrame {
         panel.add(statusBar, BorderLayout.NORTH);
         panel.add(boardWrapper, BorderLayout.CENTER);
         return panel;
+    }
+
+/**
+ * The menu's backdrop: same sky/grass look as the game board (no holes),
+ * with three mole sprites along the bottom edge — the rightmost one
+ * mid-hammer-hit. Self-contained duplicate of GamePanel's pixel-art
+ * palette/sprites/blit logic, since GamePanel's copies are private.
+ */
+    private static class TitleBackgroundPanel extends JPanel {
+        private static final int PIXEL = 6;
+        private static final Color SKY_COLOR = new Color(120, 200, 255);
+        private static final Color CLOUD_COLOR = Color.WHITE;
+        private static final Color SUN_COLOR = new Color(255, 221, 89);
+        private static final Color GRASS_DARK = new Color(56, 128, 24);
+        private static final Color GRASS_LIGHT = new Color(112, 176, 48);
+        private static final Color MOLE_OUTLINE = new Color(33, 20, 12);
+        private static final Color MOLE_BODY = new Color(158, 99, 61);
+        private static final Color MOLE_BELLY = new Color(224, 178, 122);
+        private static final Color MOLE_EYE = new Color(20, 14, 10);
+        private static final Color MOLE_NOSE = new Color(214, 92, 122);
+        private static final Color HAMMER_HEAD = new Color(140, 140, 150);
+        private static final Color HAMMER_HANDLE = new Color(120, 80, 40);
+
+        private static final int SPRITE_COLS = 16;
+        private static final int SPRITE_ROWS = 14;
+
+        private static final String[] MOLE_SPRITE = {
+            "................",
+            ".....oo..oo.....",
+            "....oBBooBBo....",
+            "...oBBBBBBBBo...",
+            "..oBBBBBBBBBBo..",
+            "..oBBBBBBBBBBo..",
+            "..oBBWBBBBWBBo..",
+            "..oBBBBBBBBBBo..",
+            "..oBBBBNNBBBBo..",
+            "..oBBBLLLLBBBo..",
+            "...oBBBLLBBBo...",
+            "....oBBBBBBo....",
+            "....oooooooo....",
+            "................",
+        };
+
+        private static final String[] MOLE_HIT_SPRITE = {
+            ".S........DD....",
+            ".....HHHHHH.....",
+            "..S..HHHHHH.S...",
+            "...oBBBBBBBBo...",
+            "..oBBBBBBBBBBo..",
+            "..oBBBBBBBBBBo..",
+            "..oBBWBBBBWBBo..",
+            "..oBBBBBBBBBBo..",
+            "..oBBBBNNBBBBo..",
+            "..oBBBLLLLBBBo..",
+            "...oBBBLLBBBo...",
+            "....oBBBBBBo....",
+            "....oooooooo....",
+            "................",
+        };
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+
+            int w = getWidth();
+            int h = getHeight();
+            int skyHeight = Math.max(80, h / 3);
+
+            g2.setColor(SKY_COLOR);
+            g2.fillRect(0, 0, w, skyHeight);
+            drawSun(g2, w - 60, 40);
+            drawCloud(g2, w / 2 - 90, 22);
+            drawCloud(g2, 50, 38);
+
+            g2.setColor(GRASS_DARK);
+            g2.fillRect(0, skyHeight, w, h - skyHeight);
+            Random rnd = new Random(42); // fixed seed => stable speckle pattern, not noisy
+            g2.setColor(GRASS_LIGHT);
+            for (int py = skyHeight; py < h; py += PIXEL) {
+                for (int px = 0; px < w; px += PIXEL) {
+                    if (rnd.nextInt(4) == 0) {
+                        g2.fillRect(px, py, PIXEL, PIXEL);
+                    }
+                }
+            }
+
+            int moleW = SPRITE_COLS * PIXEL;
+            int moleH = SPRITE_ROWS * PIXEL;
+            int gap = 36;
+            int totalW = moleW * 3 + gap * 2;
+            int startX = (w - totalW) / 2;
+            int moleY = h - moleH - 14;
+
+            drawSprite(g2, MOLE_SPRITE, startX, moleY);
+            drawSprite(g2, MOLE_SPRITE, startX + moleW + gap, moleY);
+            drawSprite(g2, MOLE_HIT_SPRITE, startX + 2 * (moleW + gap), moleY);
+        }
+
+        private void drawSun(Graphics2D g2, int cx, int cy) {
+            int rw = 17, rh = 17;
+            g2.setColor(SUN_COLOR);
+            for (int py = cy - rh; py <= cy + rh; py += PIXEL) {
+                for (int px = cx - rw; px <= cx + rw; px += PIXEL) {
+                    double dx = (px + PIXEL / 2.0 - cx) / (double) rw;
+                    double dy = (py + PIXEL / 2.0 - cy) / (double) rh;
+                    if (dx * dx + dy * dy <= 1.0) {
+                        g2.fillRect(px, py, PIXEL, PIXEL);
+                    }
+                }
+            }
+        }
+
+        private void drawCloud(Graphics2D g2, int x, int y) {
+            g2.setColor(CLOUD_COLOR);
+            g2.fillRect(x, y + PIXEL, PIXEL * 6, PIXEL * 2);
+            g2.fillRect(x + PIXEL, y, PIXEL * 4, PIXEL);
+            g2.fillRect(x + PIXEL, y + PIXEL * 3, PIXEL * 4, PIXEL);
+        }
+
+        private void drawSprite(Graphics2D g2, String[] sprite, int originX, int originY) {
+            for (int row = 0; row < SPRITE_ROWS; row++) {
+                String line = sprite[row];
+                for (int col = 0; col < SPRITE_COLS; col++) {
+                    Color c = colorFor(line.charAt(col));
+                    if (c == null) continue;
+                    g2.setColor(c);
+                    g2.fillRect(originX + col * PIXEL, originY + row * PIXEL, PIXEL, PIXEL);
+                }
+            }
+        }
+
+        private Color colorFor(char c) {
+            return switch (c) {
+                case 'o' -> MOLE_OUTLINE;
+                case 'B' -> MOLE_BODY;
+                case 'L' -> MOLE_BELLY;
+                case 'W' -> MOLE_EYE;
+                case 'N' -> MOLE_NOSE;
+                case 'H' -> HAMMER_HEAD;
+                case 'D' -> HAMMER_HANDLE;
+                case 'S' -> CLOUD_COLOR;
+                default -> null;
+            };
+        }
     }
 
     private void showGameOverDialog(int finalScore) {
