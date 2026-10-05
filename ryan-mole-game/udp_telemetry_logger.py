@@ -49,7 +49,8 @@ with open(CSV_FILENAME, mode='w', newline='') as file:
 
                 # Write to CSV
                 writer.writerow([pc_recv_time, esp_time, seq_num, latency_delta_ms, total_lost, s1, s2, s3, s4])
-                print(f"Seq: {seq_num} | S1: {s1} | Latency Delta: {latency_delta_ms}ms | Total Lost: {total_lost}")
+                print(f"Seq: {seq_num} | "f"S1: {s1} | "f"S2: {s2} | "f"S3: {s3} | "f"S4: {s4} | "f"Latency Delta: {latency_delta_ms} ms | "f"Total Lost: {total_lost}"
+)
 
     except KeyboardInterrupt:
         print(f"\n--- Logging Complete ---")
