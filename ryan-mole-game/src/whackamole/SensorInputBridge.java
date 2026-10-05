@@ -55,7 +55,7 @@ public class SensorInputBridge {
     // Index 0 = S1 ... index 3 = S4, matching the packet labels.
     // ---------------------------------------------------------------------
 
-    public static final double[] SENSOR_X_CM = {0.0, 7.5, 140.0, 151.0};
+    public static final double[] SENSOR_X_CM = {0.0, 7.2, 142.8, 150.0};
     public static final double[] SENSOR_Y_CM = {0.0, 0.0, 0.0, 0.0};
 
     /**
@@ -71,7 +71,7 @@ public class SensorInputBridge {
 
     /** Playing field in front of the sensors, in the same coordinates. */
     public static final double FIELD_MIN_X_CM = 0.0;
-    public static final double FIELD_MAX_X_CM = 151.0;
+    public static final double FIELD_MAX_X_CM = 150.0;
     /** Brief: alarm when the player is within 50 cm of the screen. */
     public static final double DEAD_ZONE_CM = 50.0;
     /** 50 cm dead zone + 150 cm playing depth. */
@@ -100,6 +100,31 @@ public class SensorInputBridge {
     private static final double MAX_STEP_CM = 40.0;
     private static final long GATE_RESET_MS = 1000;
     private static final double FIELD_TOLERANCE_CM = 30.0;
+
+    // ---- smoothing (V2 anti-jitter) ----
+    /**
+     * Stage 1, per sensor: compare each reading with the median of that
+     * sensor's last RANGE_WINDOW readings. A wild reading (a 393 cm spike, a
+     * stray echo off the wall) gets swapped for the median before the solver
+     * sees it. Normal readings pass through untouched, so walking adds no lag.
+     */
+    private static final int RANGE_WINDOW = 3;
+    /** A reading this far from its sensor's recent median counts as a spike and is replaced by the median. */
+    private static final double SPIKE_CM = 15.0;
+    /** Readings older than this are forgotten, so a stale value never lingers. */
+    private static final long RANGE_MAX_AGE_MS = 600;
+    /**
+     * Stage 2, on the solved position: exponential moving average,
+     * new = old + alpha * (measured - old). Small alpha = smoother but laggier.
+     * alpha scales with how far the fix moved: tiny wobbles (standing still)
+     * get SMOOTH_ALPHA_MIN, a move of FAST_MOVE_CM or more gets SMOOTH_ALPHA_MAX,
+     * so the cursor is calm when you stand still and keeps up when you move.
+     */
+    private static final double SMOOTH_ALPHA_MIN = 0.3;
+    private static final double SMOOTH_ALPHA_MAX = 0.9;
+    private static final double FAST_MOVE_CM = 30.0;
+    /** Single-echo fixes are rough guesses, so they only nudge the position. */
+    private static final double SMOOTH_ALPHA_SINGLE = 0.2;
 
     public enum Kind { MULTILATERATED, SINGLE_ECHO }
 
@@ -134,6 +159,22 @@ public class SensorInputBridge {
     private long fixCounter = 0;
     private Fix pendingJump = null;
 
+    private final boolean smoothing;
+    private final double[][] rangeHistory = new double[SENSOR_X_CM.length][RANGE_WINDOW];
+    private final long[][] rangeHistoryTime = new long[SENSOR_X_CM.length][RANGE_WINDOW];
+    private final int[] rangeHistoryCount = new int[SENSOR_X_CM.length];
+    private final int[] rangeHistoryNext = new int[SENSOR_X_CM.length];
+
+    /** The game uses this: smoothing on. */
+    public SensorInputBridge() {
+        this(true);
+    }
+
+    /** @param smoothing false = raw solver output, used by the accuracy tests and for V1-style comparisons. */
+    public SensorInputBridge(boolean smoothing) {
+        this.smoothing = smoothing;
+    }
+
     // ---------------------------------------------------------------------
     // public API
     // ---------------------------------------------------------------------
@@ -157,12 +198,14 @@ public class SensorInputBridge {
             if (isValid(r) && r < DEAD_ZONE_CM) close = true;
         }
 
-        Fix fix = solve(ranges, nowMs);
+        double[] filtered = smoothing ? medianFilter(ranges, nowMs) : ranges;
+        Fix fix = solve(filtered, nowMs);
         if (fix != null && fix.yCm < DEAD_ZONE_CM) close = true;
         inDeadZone = close;
 
         if (fix == null) return null;
         if (!passesJumpGate(fix)) return null;
+        if (smoothing) fix = smoothPosition(fix);
 
         latestFix = fix;
         if (fix.yCm < DEAD_ZONE_CM) {
@@ -212,6 +255,52 @@ public class SensorInputBridge {
         pendingJump = fix;
         lastFixDescription = String.format("fix: x=%.0f y=%.0f (sudden jump, waiting for confirmation)", fix.xCm, fix.yCm);
         return false;
+    }
+
+    /**
+     * Stage 1: per-sensor median of the last few readings. A sensor that says
+     * "No echo" this packet contributes nothing new, but its recent readings
+     * (under RANGE_MAX_AGE_MS old) still count, which also bridges one-packet
+     * dropouts instead of flicking to a single-echo guess.
+     */
+    private double[] medianFilter(double[] raw, long nowMs) {
+        double[] out = new double[raw.length];
+        for (int i = 0; i < raw.length; i++) {
+            if (i >= rangeHistory.length) { out[i] = raw[i]; continue; }
+            if (isValid(raw[i])) {
+                rangeHistory[i][rangeHistoryNext[i]] = raw[i];
+                rangeHistoryTime[i][rangeHistoryNext[i]] = nowMs;
+                rangeHistoryNext[i] = (rangeHistoryNext[i] + 1) % RANGE_WINDOW;
+                rangeHistoryCount[i] = Math.min(RANGE_WINDOW, rangeHistoryCount[i] + 1);
+            }
+            double[] recent = new double[RANGE_WINDOW];
+            int n = 0;
+            for (int k = 0; k < rangeHistoryCount[i]; k++) {
+                if (nowMs - rangeHistoryTime[i][k] <= RANGE_MAX_AGE_MS) recent[n++] = rangeHistory[i][k];
+            }
+            if (n == 0) { out[i] = Double.NaN; continue; }
+            java.util.Arrays.sort(recent, 0, n);
+            double median = (n % 2 == 1) ? recent[n / 2] : (recent[n / 2 - 1] + recent[n / 2]) / 2.0;
+            boolean spike = isValid(raw[i]) && Math.abs(raw[i] - median) > SPIKE_CM;
+            out[i] = (isValid(raw[i]) && !spike) ? raw[i] : median;
+        }
+        return out;
+    }
+
+    /** Stage 2: blend the new fix into the previous position (exponential moving average). */
+    private Fix smoothPosition(Fix fix) {
+        Fix last = latestFix;
+        if (last == null || fix.timeMs - last.timeMs > GATE_RESET_MS) return fix;
+        double dx = fix.xCm - last.xCm, dy = fix.yCm - last.yCm;
+        double alpha;
+        if (fix.kind == Kind.SINGLE_ECHO) {
+            alpha = SMOOTH_ALPHA_SINGLE;
+        } else {
+            double t = Math.min(1.0, Math.hypot(dx, dy) / FAST_MOVE_CM);
+            alpha = SMOOTH_ALPHA_MIN + (SMOOTH_ALPHA_MAX - SMOOTH_ALPHA_MIN) * t;
+        }
+        return new Fix(last.xCm + alpha * dx, last.yCm + alpha * dy, fix.kind, fix.sensorsUsed,
+                fix.outliersDropped, fix.residualRmsCm, fix.seq, fix.timeMs);
     }
 
     public Fix getLatestFix() { return latestFix; }
