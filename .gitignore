@@ -1,0 +1,6 @@
+
+# Arduino Wi-Fi credentials (copy secrets.example.h to secrets.h)
+secrets.h
+
+# Java build output
+ryan-mole-game/out/

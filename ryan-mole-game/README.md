@@ -1,3 +1,26 @@
+# Firmware setup (box 1 = hub, box 2 = node)
+
+| Box | Sensors | Sketch folder | Upload this |
+|---|---|---|---|
+| Box 1 (hub) | S1, S2 | `SensorF/SensorF_WiFi/` | `SensorF_WiFi.ino` |
+| Box 2 (node) | S3, S4 | `SensorF/SensorF_Node/` | `SensorF_Node.ino` |
+
+**First time on a new laptop:** in each of those two folders, copy
+`secrets.example.h` to `secrets.h` and fill in the hotspot name, password,
+laptop IP (box 1) and box 1's MAC address (box 2, printed by box 1 at startup).
+`secrets.h` is git-ignored so passwords never reach GitHub.
+
+**Start-up order:** phone hotspot on (Maximise Compatibility, keep the
+Personal Hotspot screen open) -> laptop on the hotspot -> power box 1 ->
+power box 2 -> run the game.
+
+**Healthy link:** box 2's Serial Monitor shows `Delivered to hub in last
+second: ~10 ok, 0 failed`, and both boxes print the same channel number.
+Box 2 joins the hotspot itself, so the channels always match.
+
+Old firmware lives in `SensorF/old/` as `.txt` files so Arduino never
+compiles it by accident.
+
 # V2: 4-sensor multilateration + live tracking trail
 
 Full scale: 1.5 m x 1.5 m playing area starting 50 cm from the wall (the

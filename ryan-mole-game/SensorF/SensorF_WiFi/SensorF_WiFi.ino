@@ -2,8 +2,13 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <esp_now.h>
-
+#include <esp_wifi.h>
+#include <esp_arduino_version.h>
 #include <WebServer.h>
+
+// ===================== BOX 1 (HUB) =====================
+// Reads S1/S2, receives S3/S4 from box 2 over ESP-NOW,
+// sends all four to the laptop over UDP.
 
 WebServer server(80);
 
@@ -15,18 +20,20 @@ const int ECHO_PIN_2 = 13;
 
 const unsigned long ECHO_TIMEOUT = 30000; // 30 ms
 
-// Wifi Settings
-const char *WIFI_SSID = "iPhone (2)";
-const char *WIFI_PASSWORD = "theultrasaim";
-const char *PC_IP = "172.20.10.11";
+// Wi-Fi name, password and laptop IP live in secrets.h (not on GitHub).
+// First time: copy secrets.example.h to secrets.h and fill it in.
+#include "secrets.h"
 const uint16_t PC_PORT = 4210;
 
 WiFiUDP udp;
 unsigned long sequenceNumber = 0;
 
-// Remote Sensor Data
+// Remote Sensor Data (from box 2)
 float remoteDist3 = -1.0;
 float remoteDist4 = -1.0;
+volatile unsigned long lastRemoteMs = 0;     // when box 2 was last heard
+volatile unsigned long remoteCount = 0;      // messages from box 2 this second
+const unsigned long REMOTE_STALE_MS = 500;   // older than this = report "No echo"
 
 float localDist1 = -1.0;
 float localDist2 = -1.0;
@@ -37,19 +44,18 @@ typedef struct struct_message {
 } struct_message;
 struct_message incomingReadings;
 
-// ESP-NOW Receive Callback
-//void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  //memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
-  //remoteDist3 = incomingReadings.distance3;
-  //remoteDist4 = incomingReadings.distance4;
-//}
-
+// The receive callback changed shape in ESP32 core 3.x, so pick the right one.
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+#else
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-
-    memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
-
-    remoteDist3 = incomingReadings.distance3;
-    remoteDist4 = incomingReadings.distance4;
+#endif
+  if (len != sizeof(incomingReadings)) return;   // ignore anything that isn't box 2's message
+  memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+  remoteDist3 = incomingReadings.distance3;
+  remoteDist4 = incomingReadings.distance4;
+  lastRemoteMs = millis();
+  remoteCount++;
 }
 
 float measureDistanceCM(int trigPin, int echoPin) {
@@ -79,7 +85,7 @@ void sendSensorValues(float distance1, float distance2, float distance3, float d
 
   char payload[128];
   unsigned long espTime = millis();
-  
+
   snprintf(payload, sizeof(payload),
            "Seq:%lu|Time:%lu|S1:%s|S2:%s|S3:%s|S4:%s",
            sequenceNumber++, espTime, reading1, reading2, reading3, reading4);
@@ -92,28 +98,20 @@ void sendSensorValues(float distance1, float distance2, float distance3, float d
 }
 
 String sensorText(float value) {
-  if (value < 0)
-    return "No echo";
+  if (value < 0) return "No echo";
   return String(value, 1) + " cm";
 }
 
 void handleRoot() {
-  String page = "<html><head>";
-  page += "<meta http-equiv='refresh' content='0.5'>";
-  page += "</head><body>";
-
+  String page = "<html><head><meta http-equiv='refresh' content='0.5'></head><body>";
   page += "<h2>ESP32 Sensor Monitor</h2>";
-
   page += "<p>Sensor 1: " + sensorText(localDist1) + "</p>";
   page += "<p>Sensor 2: " + sensorText(localDist2) + "</p>";
   page += "<p>Sensor 3: " + sensorText(remoteDist3) + "</p>";
   page += "<p>Sensor 4: " + sensorText(remoteDist4) + "</p>";
-
   page += "</body></html>";
-
   server.send(200, "text/html", page);
 }
-  
 
 void setup() {
   Serial.begin(115200);
@@ -126,75 +124,75 @@ void setup() {
   digitalWrite(TRIG_PIN_1, LOW);
   digitalWrite(TRIG_PIN_2, LOW);
 
-  // Must be AP_STA for simultaneous Wi-Fi UDP and ESP-NOW
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   Serial.print("Connecting to Wi-Fi");
-
   unsigned long start = millis();
-
   while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
     delay(500);
     Serial.print(".");
   }
-
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("Wi-Fi connected!");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-
     server.on("/", handleRoot);
     server.begin();
     Serial.println("HTTP server started");
   } else {
     Serial.println("Wi-Fi FAILED!");
   }
-  
-  // PRINT MAC ADDRESS FOR THE NODE
+
+  // KEY FIX: by default the ESP32 naps its radio between hotspot beacons
+  // (modem sleep). While napping it can't hear box 2, so most ESP-NOW
+  // messages fail. Keep the radio awake.
+  WiFi.setSleep(false);
+
+  Serial.print("Hub channel = ");
+  Serial.println(WiFi.channel());
   Serial.print("HUB MAC ADDRESS: ");
   Serial.println(WiFi.macAddress());
 
   udp.begin(PC_PORT);
 
   esp_err_t status = esp_now_init();
-
   Serial.print("ESP-NOW init = ");
   Serial.println(status);
-
   if (status != ESP_OK) {
-      Serial.println("Error initializing ESP-NOW");
-      return;
+    Serial.println("Error initializing ESP-NOW");
+    return;
   }
-
   esp_now_register_recv_cb(OnDataRecv);
   Serial.println("Receive callback registered");
 }
 
+unsigned long lastReportMs = 0;
+
 void loop() {
   localDist1 = measureDistanceCM(TRIG_PIN_1, ECHO_PIN_1);
-  delay(60);
+  delay(40);
   localDist2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
 
-  // Send local + latest remote data
-  sendSensorValues(localDist1, localDist2, remoteDist3, remoteDist4);
+  // Only pass on box 2's readings if they're fresh; otherwise report No echo
+  // so the game never tracks a frozen old value.
+  bool remoteFresh = (millis() - lastRemoteMs) < REMOTE_STALE_MS;
+  sendSensorValues(localDist1, localDist2,
+                   remoteFresh ? remoteDist3 : -1.0,
+                   remoteFresh ? remoteDist4 : -1.0);
   server.handleClient();
-  
-  delay(100);
+
+  if (millis() - lastReportMs >= 1000) {
+    lastReportMs = millis();
+    Serial.print("Heard from box 2 in last second: ");
+    Serial.print(remoteCount);
+    Serial.print("   (hub channel ");
+    Serial.print(WiFi.channel());
+    Serial.println(")");
+    remoteCount = 0;
+  }
+
+  delay(40);
 }
-
-//void loop() {
-
-   // float d1 = measureDistanceCM(TRIG_PIN_1, ECHO_PIN_1);
-    //float d2 = measureDistanceCM(TRIG_PIN_2, ECHO_PIN_2);
-
-    //Serial.print("S1 = ");
-    //Serial.print(d1);
-
-    //Serial.print("   S2 = ");
-    //Serial.println(d2);
-
-    //delay(500);
-//}
