@@ -9,6 +9,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
@@ -25,6 +26,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.List;
 import java.util.Random;
 
 /**
@@ -54,6 +56,7 @@ public class GameFrame extends JFrame {
 
     private static final String CARD_MENU = "menu";
     private static final String CARD_RULES = "rules";
+    private static final String CARD_HIGHSCORES = "highscores";
     private static final String CARD_GAME = "game";
 
     private final CardLayout cardLayout = new CardLayout();
@@ -63,6 +66,8 @@ public class GameFrame extends JFrame {
     private final JLabel levelLabel = new JLabel("LVL 1");
     private final JLabel timeLabel = new JLabel("TIME 30");
     private final GamePanel gamePanel;
+    private final HighScoreManager highScoreManager = new HighScoreManager();
+    private final JTextArea highScoresText = new JTextArea();
 
     public GameFrame() {
         this(false);
@@ -79,8 +84,10 @@ public class GameFrame extends JFrame {
         cards.setBackground(CABINET_BG);
         cards.add(buildMenuPanel(), CARD_MENU);
         cards.add(buildRulesPanel(), CARD_RULES);
+        cards.add(buildHighScoresPanel(), CARD_HIGHSCORES);
         cards.add(buildGamePanel(gamePanel), CARD_GAME);
         add(cards, BorderLayout.CENTER);
+        refreshHighScoresDisplay();
 
         gamePanel.addGameListener(new GameListener() {
             @Override
@@ -103,7 +110,10 @@ public class GameFrame extends JFrame {
             @Override
             public void onGameOver(int finalScore) {
                 SwingUtilities.invokeLater(() -> {
-                    showGameOverDialog(finalScore);
+                    String name = promptForUsername(finalScore);
+                    boolean madeList = highScoreManager.addScore(name, finalScore);
+                    refreshHighScoresDisplay();
+                    showGameOverDialog(finalScore, madeList);
                     cardLayout.show(cards, CARD_MENU);
                 });
             }
@@ -139,15 +149,26 @@ public class GameFrame extends JFrame {
             gamePanel.startGame();
         });
 
+        JButton highScoresButton = new JButton("HIGH SCORES");
+        styleMenuButton(highScoresButton, BACK_BUTTON_BG);
+        highScoresButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        highScoresButton.addActionListener(e -> {
+            refreshHighScoresDisplay();
+            cardLayout.show(cards, CARD_HIGHSCORES);
+        });
+
         JButton rulesButton = new JButton("RULES");
         styleMenuButton(rulesButton, BACK_BUTTON_BG);
         rulesButton.setAlignmentX(Component.CENTER_ALIGNMENT);
         rulesButton.addActionListener(e -> cardLayout.show(cards, CARD_RULES));
 
-        panel.add(Box.createVerticalStrut(100));
+        panel.add(Box.createVerticalGlue());
+        panel.add(Box.createVerticalStrut(30));
         panel.add(title);
         panel.add(Box.createVerticalStrut(50));
         panel.add(playButton);
+        panel.add(Box.createVerticalStrut(24));
+        panel.add(highScoresButton);
         panel.add(Box.createVerticalStrut(24));
         panel.add(rulesButton);
         panel.add(Box.createVerticalGlue());
@@ -207,6 +228,58 @@ public class GameFrame extends JFrame {
         panel.add(textWrapper, BorderLayout.CENTER);
         panel.add(backWrapper, BorderLayout.SOUTH);
         return panel;
+    }
+
+    private JPanel buildHighScoresPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(CABINET_BG);
+        panel.setBorder(new EmptyBorder(30, 40, 30, 40));
+
+        JLabel title = new JLabel("HIGH SCORES");
+        title.setFont(TITLE_FONT.deriveFont(28f));
+        title.setForeground(SCORE_COLOR);
+        title.setHorizontalAlignment(SwingConstants.CENTER);
+
+        highScoresText.setFont(RULES_TEXT_FONT);
+        highScoresText.setForeground(new Color(230, 230, 230));
+        highScoresText.setBackground(READOUT_BG);
+        highScoresText.setEditable(false);
+        highScoresText.setBorder(new CompoundBorder(
+                new LineBorder(SCORE_COLOR.darker(), 2),
+                new EmptyBorder(16, 20, 16, 20)));
+
+        JButton backButton = new JButton("BACK");
+        styleMenuButton(backButton, BACK_BUTTON_BG);
+        backButton.addActionListener(e -> cardLayout.show(cards, CARD_MENU));
+
+        JPanel backWrapper = new JPanel();
+        backWrapper.setBackground(CABINET_BG);
+        backWrapper.setBorder(new EmptyBorder(20, 0, 0, 0));
+        backWrapper.add(backButton);
+
+        JPanel textWrapper = new JPanel(new BorderLayout());
+        textWrapper.setBackground(CABINET_BG);
+        textWrapper.setBorder(new EmptyBorder(20, 0, 0, 0));
+        textWrapper.add(highScoresText, BorderLayout.CENTER);
+
+        panel.add(title, BorderLayout.NORTH);
+        panel.add(textWrapper, BorderLayout.CENTER);
+        panel.add(backWrapper, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private void refreshHighScoresDisplay() {
+        List<HighScoreManager.Entry> scores = highScoreManager.getTopScores();
+        StringBuilder sb = new StringBuilder();
+        if (scores.isEmpty()) {
+            sb.append("No scores yet — play a round!");
+        } else {
+            for (int i = 0; i < scores.size(); i++) {
+                HighScoreManager.Entry e = scores.get(i);
+                sb.append(String.format("%d.  %-12s %04d%n", i + 1, e.name(), e.score()));
+            }
+        }
+        highScoresText.setText(sb.toString());
     }
 
     private JPanel buildGamePanel(GamePanel gamePanel) {
@@ -380,10 +453,44 @@ public class GameFrame extends JFrame {
         }
     }
 
-    private void showGameOverDialog(int finalScore) {
-        JLabel message = new JLabel(String.format("GAME OVER — FINAL SCORE %04d", finalScore));
+    /** Asks who just played. Cancelling or leaving it blank saves the score under "Guest". */
+    private String promptForUsername(int finalScore) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(READOUT_BG);
+        panel.setBorder(new EmptyBorder(12, 16, 12, 16));
+
+        JLabel prompt = new JLabel(String.format("SCORE %04d \u2014 ENTER YOUR NAME", finalScore));
+        prompt.setFont(RETRO_FONT.deriveFont(14f));
+        prompt.setForeground(SCORE_COLOR);
+        prompt.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JTextField nameField = new JTextField(12);
+        nameField.setFont(RETRO_FONT);
+        nameField.setMaximumSize(new Dimension(220, 36));
+        nameField.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        panel.add(prompt);
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(nameField);
+
+        int result = JOptionPane.showConfirmDialog(this, panel, "Whack-a-Mole",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        String name = nameField.getText();
+        if (result != JOptionPane.OK_OPTION || name == null || name.trim().isEmpty()) {
+            return "Guest";
+        }
+        return name.trim();
+    }
+
+    private void showGameOverDialog(int finalScore, boolean madeHighScoreList) {
+        String headline = madeHighScoreList
+                ? String.format("NEW HIGH SCORE! \u2014 %04d", finalScore)
+                : String.format("GAME OVER \u2014 FINAL SCORE %04d", finalScore);
+        JLabel message = new JLabel(headline);
         message.setFont(RETRO_FONT);
-        message.setForeground(SCORE_COLOR);
+        message.setForeground(madeHighScoreList ? BUTTON_BG : SCORE_COLOR);
         message.setOpaque(true);
         message.setBackground(READOUT_BG);
         message.setBorder(new EmptyBorder(12, 16, 12, 16));
