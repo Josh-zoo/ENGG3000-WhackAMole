@@ -186,7 +186,9 @@ public class MultilaterationTest {
 
         // ---- Monte Carlo: how much does sensor choice matter? ----
         System.out.println("Monte Carlo, sigma_r = 0.5 cm, 4000 trials per point (sigma_x / sigma_y in cm)");
-        System.out.println("point        S1+S2 (10cm)   S1+S3 (140cm)   all four");
+        System.out.printf("point        S1+S2 (%.1fcm)  S1+S3 (%.1fcm)  all four%n",
+                SensorInputBridge.SENSOR_X_CM[1] - SensorInputBridge.SENSOR_X_CM[0],
+                SensorInputBridge.SENSOR_X_CM[2] - SensorInputBridge.SENSOR_X_CM[0]);
         Random rnd = new Random(42);
         double[][] pts = {{75, 125}, {30, 80}, {120, 180}, {75, 195}};
         for (double[] pt : pts) {
