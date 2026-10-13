@@ -108,12 +108,12 @@ public class GameFrame extends JFrame {
             }
 
             @Override
-            public void onGameOver(int finalScore) {
+            public void onGameOver(int finalScore, int hits, int misses, double accuracy, double averageReaction) {
                 SwingUtilities.invokeLater(() -> {
                     String name = promptForUsername(finalScore);
                     boolean madeList = highScoreManager.addScore(name, finalScore);
                     refreshHighScoresDisplay();
-                    showGameOverDialog(finalScore, madeList);
+                    showGameOverDialog(finalScore, madeList, hits, misses, accuracy, averageReaction);
                     cardLayout.show(cards, CARD_MENU);
                 });
             }
@@ -484,11 +484,25 @@ public class GameFrame extends JFrame {
         return name.trim();
     }
 
-    private void showGameOverDialog(int finalScore, boolean madeHighScoreList) {
+    private void showGameOverDialog(int finalScore, boolean madeHighScoreList, int hits, int misses, double accuracy, double averageReaction) {
         String headline = madeHighScoreList
                 ? String.format("NEW HIGH SCORE! \u2014 %04d", finalScore)
                 : String.format("GAME OVER \u2014 FINAL SCORE %04d", finalScore);
-        JLabel message = new JLabel(headline);
+        String text = String.format(
+                "<html><center>" +
+                "<b>%s</b><br><br>" +
+                "Hits: %d<br>" +
+                "Misses: %d<br>" +
+                "Accuracy: %.1f%%<br>" +
+                "Average Reaction: %.0f ms" +
+                "</center></html>",
+                headline,
+                hits,
+                misses,
+                accuracy,
+                averageReaction
+        );
+        JLabel message = new JLabel(text);
         message.setFont(RETRO_FONT);
         message.setForeground(madeHighScoreList ? BUTTON_BG : SCORE_COLOR);
         message.setOpaque(true);

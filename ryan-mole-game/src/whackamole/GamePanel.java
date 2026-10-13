@@ -183,6 +183,14 @@ public class GamePanel extends JPanel {
     private volatile String sensorDebugLabel = "Wireless: waiting...";
     private boolean previousDeadZone = false;
     private int score = 0;
+    private int totalMolesSpawned = 0;
+    private int hits = 0;
+    private int misses = 0;
+
+    private long totalReactionTime = 0;
+    private int successfulHits = 0;
+
+    private long currentMoleSpawnTime = 0;
     private long nextSpawnAtMs = 0;
     private long roundEndAtMs = 0;
     private boolean running = false;
@@ -255,6 +263,12 @@ public class GamePanel extends JPanel {
     public void startGame() {
         for (Mole m : moles) m.hide();
         score = 0;
+        totalMolesSpawned = 0;
+        hits = 0;
+        misses = 0;
+        totalReactionTime = 0;
+        successfulHits = 0;
+        currentMoleSpawnTime = 0;
         levelManager.reset();
         intermissionActive = false;
         intermissionHoverStartMs = -1;
@@ -395,6 +409,9 @@ public class GamePanel extends JPanel {
                 Mole mole = hidden.get(random.nextInt(hidden.size()));
                 int upTime = randomBetween(level.getMinUpTimeMs(), level.getMaxUpTimeMs());
                 mole.popUp(now, upTime);
+
+                totalMolesSpawned++;
+                currentMoleSpawnTime = now;
             }
             scheduleNextSpawn(now);
         }
@@ -428,8 +445,12 @@ public class GamePanel extends JPanel {
         long now = System.currentTimeMillis();
         Level level = levelManager.getCurrentLevel();
         score += level.getPointsPerHit();
+        hits++;
+        successfulHits++;
+        totalReactionTime += now - currentMoleSpawnTime;
         fireScoreChanged();
         mole.markResolved();
+        misses++;
         mole.markHit(now); // show the hammer sprite briefly instead of vanishing instantly
         if (levelManager.maybeAdvance(score)) {
             fireLevelChanged();
@@ -844,6 +865,23 @@ public class GamePanel extends JPanel {
     }
 
     private void fireGameOver(int finalScore) {
-        for (GameListener l : listeners) l.onGameOver(finalScore);
+
+        double accuracy =
+                totalMolesSpawned == 0 ? 0 :
+                hits * 100.0 / totalMolesSpawned;
+
+        double averageReaction =
+                successfulHits == 0 ? 0 :
+                totalReactionTime / (double) successfulHits;
+
+        for (GameListener l : listeners) {
+            l.onGameOver(
+                    finalScore,
+                    hits,
+                    misses,
+                    accuracy,
+                    averageReaction
+            );
+        }
     }
 }
