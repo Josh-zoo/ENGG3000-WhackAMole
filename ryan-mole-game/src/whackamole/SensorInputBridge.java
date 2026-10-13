@@ -55,7 +55,7 @@ public class SensorInputBridge {
     // Index 0 = S1 ... index 3 = S4, matching the packet labels.
     // ---------------------------------------------------------------------
 
-    public static final double[] SENSOR_X_CM = {0.0, 7.2, 142.8, 150.0};
+    public static final double[] SENSOR_AIM_DEG = {15.0, 40.0, -40.0, -15.0};
     public static final double[] SENSOR_Y_CM = {0.0, 0.0, 0.0, 0.0};
 
     /**
