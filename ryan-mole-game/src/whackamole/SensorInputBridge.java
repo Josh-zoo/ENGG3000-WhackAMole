@@ -55,8 +55,32 @@ public class SensorInputBridge {
     // Index 0 = S1 ... index 3 = S4, matching the packet labels.
     // ---------------------------------------------------------------------
 
-    public static final double[] SENSOR_AIM_DEG = {15.0, 40.0, -40.0, -15.0};
-    public static final double[] SENSOR_Y_CM = {0.0, 0.0, 0.0, 0.0};
+    // ---- 3D-printed boxes (sensor_box.py) ----
+    // Each box sits with its BACK WALL on the screen line (y = 0). The only
+    // things to measure on the day are where each box's back-left corner is
+    // along the wall. Everything else comes from the printed geometry.
+    /** x of the LEFT box's back-left outer corner (cm). */
+    public static final double LEFT_BOX_X_CM = 0.0;
+    /** x of the RIGHT box's back-left outer corner (cm). Box is 9.55 cm wide. */
+    public static final double RIGHT_BOX_X_CM = 150.0 - 9.55;
+
+    /**
+     * Where each transducer pair's ranging origin sits inside a box, relative
+     * to that box's back-left corner (cm). Taken from the CAD (face centre)
+     * plus 0.8 cm along the aim (cans stick out 10 mm from the board, 8 mm past the face).
+     * Left box holds S1 (outer) and S2 (inner); the right box is its mirror.
+     */
+    private static final double[][] LEFT_BOX_OFFSETS  = {{2.91, 9.85}, {7.99, 7.23}};   // S1, S2
+    private static final double[][] RIGHT_BOX_OFFSETS = {{1.55, 7.23},  {6.63, 9.85}};   // S3, S4
+
+    public static final double[] SENSOR_X_CM = {
+            LEFT_BOX_X_CM + LEFT_BOX_OFFSETS[0][0],
+            LEFT_BOX_X_CM + LEFT_BOX_OFFSETS[1][0],
+            RIGHT_BOX_X_CM + RIGHT_BOX_OFFSETS[0][0],
+            RIGHT_BOX_X_CM + RIGHT_BOX_OFFSETS[1][0]};
+    public static final double[] SENSOR_Y_CM = {
+            LEFT_BOX_OFFSETS[0][1], LEFT_BOX_OFFSETS[1][1],
+            RIGHT_BOX_OFFSETS[0][1], RIGHT_BOX_OFFSETS[1][1]};
 
     /**
      * Where each sensor points, in degrees from straight out into the room
@@ -66,7 +90,7 @@ public class SensorInputBridge {
      * about 99%. The solver maths doesn't use these; they're only used for
      * the single-echo fallback and by the simulator.
      */
-    public static final double[] SENSOR_AIM_DEG = {25.0, 25.0, -25.0, -25.0};
+    public static final double[] SENSOR_AIM_DEG = {15.0, 40.0, -40.0, -15.0};
     public static final double BEAM_HALF_ANGLE_DEG = 15.0;
 
     /** Playing field in front of the sensors, in the same coordinates. */

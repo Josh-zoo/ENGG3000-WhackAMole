@@ -74,7 +74,7 @@ public class MultilaterationTest {
         b = new SensorInputBridge(false);
         f = b.acceptRanges(new double[]{Double.NaN, Double.NaN, 120, Double.NaN}, 0);
         double aim3 = Math.toRadians(SensorInputBridge.SENSOR_AIM_DEG[2]);
-        double ex = SensorInputBridge.SENSOR_X_CM[2] + 120 * Math.sin(aim3), ey = 120 * Math.cos(aim3);
+        double ex = SensorInputBridge.SENSOR_X_CM[2] + 120 * Math.sin(aim3), ey = SensorInputBridge.SENSOR_Y_CM[2] + 120 * Math.cos(aim3);
         check("single echo along aim line", f != null && f.kind == SensorInputBridge.Kind.SINGLE_ECHO
                         && Math.abs(f.xCm - ex) < 0.1 && Math.abs(f.yCm - ey) < 0.1,
                 f == null ? "null" : f.kind + String.format(" (%.0f, %.0f)", f.xCm, f.yCm));
