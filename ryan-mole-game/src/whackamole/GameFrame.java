@@ -1,15 +1,18 @@
 package whackamole;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
@@ -25,7 +28,12 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.List;
 import java.util.Random;
 
@@ -121,9 +129,28 @@ public class GameFrame extends JFrame {
 
         cardLayout.show(cards, CARD_MENU);
 
-        pack();
-        setLocationRelativeTo(null);
+        // Kiosk-style fullscreen: no title bar, sized to cover the whole
+        // screen, and maximized so it stays that way. This is computed once
+        // at startup from whatever the display's current resolution is --
+        // there's no live window-resize support, by design.
+        setUndecorated(true);
         setResizable(false);
+        GraphicsDevice screenDevice = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
+        Rectangle screenBounds = screenDevice.getDefaultConfiguration().getBounds();
+        setBounds(screenBounds);
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
+
+        // Undecorated means there's no title bar/close button to quit from,
+        // so give Esc that job from anywhere in the app.
+        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "quitFullscreen");
+        getRootPane().getActionMap().put("quitFullscreen", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dispose();
+                System.exit(0);
+            }
+        });
     }
 
     // ---- screens -------------------------------------------------------------
@@ -297,10 +324,14 @@ public class GameFrame extends JFrame {
         statusBar.add(levelLabel);
         statusBar.add(timeLabel);
 
-        JPanel boardWrapper = new JPanel();
+        // BorderLayout.CENTER (not the old FlowLayout) so gamePanel actually
+        // stretches to fill the fullscreen window instead of sitting at its
+        // preferred size -- GamePanel.paintComponent() scales its board art
+        // to whatever size it's given.
+        JPanel boardWrapper = new JPanel(new BorderLayout());
         boardWrapper.setBackground(CABINET_BG);
         boardWrapper.setBorder(new EmptyBorder(0, 12, 12, 12));
-        boardWrapper.add(gamePanel);
+        boardWrapper.add(gamePanel, BorderLayout.CENTER);
 
         panel.add(statusBar, BorderLayout.NORTH);
         panel.add(boardWrapper, BorderLayout.CENTER);

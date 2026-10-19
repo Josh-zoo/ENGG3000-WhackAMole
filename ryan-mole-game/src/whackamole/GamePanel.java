@@ -16,6 +16,7 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.event.ActionEvent;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -63,6 +64,16 @@ public class GamePanel extends JPanel {
     private static final int BOARD_HEIGHT_PX = GRID_ROWS * CELL_H + (GRID_ROWS - 1) * CELL_GAP;
     private static final int FIELD_OFFSET_X = BORDER;
     private static final int FIELD_OFFSET_Y = BORDER + SKY_HEIGHT;
+
+    // The whole board is always drawn at this fixed "design" size, in design
+    // pixels -- every layout/sprite constant above assumes it. paintComponent()
+    // then scales that design canvas up (uniformly, keeping aspect ratio) to
+    // fill however big the real window turns out to be, so going fullscreen
+    // is just a bigger scale factor rather than a layout rewrite. Any leftover
+    // space from a mismatched aspect ratio is letterboxed in cabinet wood,
+    // never left black.
+    private static final int DESIGN_WIDTH = BOARD_WIDTH_PX + 2 * BORDER;
+    private static final int DESIGN_HEIGHT = SKY_HEIGHT + BOARD_HEIGHT_PX + 2 * BORDER;
 
     private static final int LEVEL_DURATION_MS = 30_000; // fresh timer at the start of each level
     private static final int FRAME_DELAY_MS = 16;          // ~60 fps game loop
@@ -196,9 +207,10 @@ public class GamePanel extends JPanel {
 
     /** @param simulate true = generate fake sensor packets instead of listening on UDP (no hardware needed). */
     public GamePanel(boolean simulate) {
-        int panelW = BOARD_WIDTH_PX + 2 * BORDER;
-        int panelH = SKY_HEIGHT + BOARD_HEIGHT_PX + 2 * BORDER;
-        setPreferredSize(new Dimension(panelW, panelH));
+        // Just the starting hint for layout -- the frame maximizes over this,
+        // and paintComponent() scales the design canvas to whatever size the
+        // panel actually ends up being.
+        setPreferredSize(new Dimension(DESIGN_WIDTH, DESIGN_HEIGHT));
         setBackground(CABINET_WOOD);
 
         grassBackground = createGrassTexture(BOARD_WIDTH_PX, BOARD_HEIGHT_PX);
@@ -506,7 +518,11 @@ public class GamePanel extends JPanel {
     }
 
     private Rectangle continueButtonBounds() {
-        int x = (getWidth() - CONTINUE_BTN_W) / 2;
+        // Design-space coordinates: this is compared against toBoard(), which
+        // also returns design-space points, and drawn inside the scaled
+        // transform in paintComponent() -- never against the real (fullscreen)
+        // panel size.
+        int x = (DESIGN_WIDTH - CONTINUE_BTN_W) / 2;
         int y = FIELD_OFFSET_Y + BOARD_HEIGHT_PX / 2 + 10;
         return new Rectangle(x, y, CONTINUE_BTN_W, CONTINUE_BTN_H);
     }
@@ -521,6 +537,27 @@ public class GamePanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
 
+        int panelW = getWidth();
+        int panelH = getHeight();
+
+        // Paint the *real* panel (which may be a much bigger fullscreen area
+        // than the design canvas) in cabinet wood first, so any letterboxing
+        // from an aspect-ratio mismatch shows as more cabinet, never black.
+        g2.setColor(CABINET_WOOD);
+        g2.fillRect(0, 0, panelW, panelH);
+
+        double scale = Math.min(panelW / (double) DESIGN_WIDTH, panelH / (double) DESIGN_HEIGHT);
+        int offsetX = (int) Math.round((panelW - DESIGN_WIDTH * scale) / 2.0);
+        int offsetY = (int) Math.round((panelH - DESIGN_HEIGHT * scale) / 2.0);
+
+        AffineTransform baseTransform = g2.getTransform();
+        g2.translate(offsetX, offsetY);
+        g2.scale(scale, scale);
+
+        // Everything from here down is drawn in fixed "design pixel" units
+        // (DESIGN_WIDTH x DESIGN_HEIGHT), exactly as before fullscreen support
+        // was added -- the transform above is what stretches it to fill the
+        // real window.
         drawCabinetBorder(g2);
         drawSky(g2);
         g2.drawImage(grassBackground, FIELD_OFFSET_X, FIELD_OFFSET_Y, null);
@@ -559,11 +596,13 @@ public class GamePanel extends JPanel {
         if (sensorInputBridge.isInDeadZone()) {
             drawDeadZoneWarning(g2);
         }
+
+        g2.setTransform(baseTransform);
     }
 
     private void drawCabinetBorder(Graphics2D g2) {
         g2.setColor(CABINET_WOOD);
-        g2.fillRect(0, 0, getWidth(), getHeight());
+        g2.fillRect(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
         g2.setColor(CABINET_TRIM);
         g2.fillRect(BORDER - 6, BORDER - 6, BOARD_WIDTH_PX + 12, SKY_HEIGHT + BOARD_HEIGHT_PX + 12);
     }
@@ -699,7 +738,7 @@ public class GamePanel extends JPanel {
         g2.setColor(OVERLAY_TINT);
         g2.fillRect(BORDER, BORDER, BOARD_WIDTH_PX, SKY_HEIGHT + BOARD_HEIGHT_PX);
 
-        int centerX = getWidth() / 2;
+        int centerX = DESIGN_WIDTH / 2;
         int completedLevel = levelManager.getCurrentLevel().getNumber() - 1;
 
         g2.setFont(OVERLAY_TITLE_FONT);
@@ -775,7 +814,7 @@ public class GamePanel extends JPanel {
 
     private void drawDeadZoneWarning(Graphics2D g2) {
         g2.setColor(new Color(220, 0, 0, 180));
-        g2.fillRect(0, 0, getWidth(), 35);
+        g2.fillRect(0, 0, DESIGN_WIDTH, 35);
 
         g2.setColor(Color.WHITE);
         g2.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 18));
