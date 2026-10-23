@@ -95,6 +95,24 @@ public class GamePanel extends JPanel {
     private static final int HOLE_H = 44;
     private static final int HOLE_BOTTOM_MARGIN = 10; // gap from cell bottom to hole center
 
+    private static class FloatingText {
+        final String message;
+        final int x, y;
+        final Color color;
+        final long startTime;
+
+        FloatingText(String message, int x, int y, Color color, long startTime) {
+            this.message = message;
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.startTime = startTime;
+        }
+    }
+
+    private static final long FLOAT_DURATION_MS = 700;
+    private final List<FloatingText> floatingTexts = new ArrayList<>();
+
     // Hand-authored 16x14 pixel-art mole sprite. Each character is one
     // PIXEL x PIXEL block. '.' is transparent; see colorFor() for the rest.
     private static final String[] MOLE_SPRITE = {
@@ -295,6 +313,8 @@ public class GamePanel extends JPanel {
         fireScoreChanged();
         fireLevelChanged();
         fireTimeChanged(LEVEL_DURATION_MS);
+
+        floatingTexts.clear();
     }
 
     public void stopGame() {
@@ -400,6 +420,8 @@ public class GamePanel extends JPanel {
         resolveExpiredMoles(now);
         finalizeHitMoles(now);
         finalizeSinkingMoles(now);
+        floatingTexts.removeIf(text ->
+            now - text.startTime >= FLOAT_DURATION_MS);
 
         repaint();
     }
@@ -457,12 +479,12 @@ public class GamePanel extends JPanel {
         long now = System.currentTimeMillis();
         Level level = levelManager.getCurrentLevel();
         score += level.getPointsPerHit();
+        showFloatingText(mole, "+" + level.getPointsPerHit() + " HIT!", Color.GREEN, now);
         hits++;
         successfulHits++;
         totalReactionTime += now - currentMoleSpawnTime;
         fireScoreChanged();
         mole.markResolved();
-        misses++;
         mole.markHit(now); // show the hammer sprite briefly instead of vanishing instantly
         if (levelManager.maybeAdvance(score)) {
             fireLevelChanged();
@@ -470,10 +492,23 @@ public class GamePanel extends JPanel {
         }
     }
 
+    private void showFloatingText(Mole mole, String message, Color color, long now) {
+        int index = moles.indexOf(mole);
+        if (index < 0) return;
+
+        Rectangle cell = cellBounds.get(index);
+        int x = cell.x + cell.width / 2;
+        int y = cell.y + cell.height / 2;
+
+        floatingTexts.add(new FloatingText(message, x, y, color, now));
+    }
+
     /** Moles whose up-time ran out without ever being matched by checkForHit() are simply misses. */
     private void resolveExpiredMoles(long now) {
         for (Mole mole : moles) {
             if (mole.isExpired(now) && !mole.isResolved()) {
+                misses++;
+                showFloatingText(mole, "MISS!", Color.RED, now);
                 mole.markResolved();
                 mole.startSinking(now); // animate back down instead of vanishing instantly
             }
@@ -596,6 +631,8 @@ public class GamePanel extends JPanel {
             }
         }
 
+        drawFloatingTexts(g2, now);
+
         // ...but switch back to smoothed drawing for the tracking overlay, it reads much better.
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
@@ -679,6 +716,31 @@ public class GamePanel extends JPanel {
         g2.fillRect(cx + HOLE_W / 2 - PIXEL * 4, tuftY - PIXEL, PIXEL, PIXEL);
 
         return openingY;
+    }
+
+    private void drawFloatingTexts(Graphics2D g2, long now) {
+        Font oldFont = g2.getFont();
+        java.awt.Composite oldComposite = g2.getComposite();
+
+        g2.setFont(new Font(Font.MONOSPACED, Font.BOLD, 18));
+
+        for (FloatingText text : floatingTexts) {
+            double progress = Math.min(1.0,
+                    (now - text.startTime) / (double) FLOAT_DURATION_MS);
+
+            int y = text.y - (int) (progress * 35);
+            float alpha = (float) (1.0 - progress);
+
+            g2.setComposite(java.awt.AlphaComposite.getInstance(
+                    java.awt.AlphaComposite.SRC_OVER, alpha));
+
+            g2.setColor(text.color);
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(text.message, text.x - fm.stringWidth(text.message) / 2, y);
+        }
+
+        g2.setComposite(oldComposite);
+        g2.setFont(oldFont);
     }
 
     private void drawPixelEllipse(Graphics2D g2, int cx, int cy, int w, int h, Color color) {
@@ -906,8 +968,8 @@ public class GamePanel extends JPanel {
     private void fireGameOver(int finalScore) {
 
         double accuracy =
-                totalMolesSpawned == 0 ? 0 :
-                hits * 100.0 / totalMolesSpawned;
+                (hits + misses) == 0 ? 0 :
+                hits * 100.0 / (hits + misses);
 
         double averageReaction =
                 successfulHits == 0 ? 0 :
