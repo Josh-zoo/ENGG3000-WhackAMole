@@ -10,5 +10,5 @@ public interface GameListener {
     default void onScoreChanged(int newScore) {}
     default void onLevelChanged(int newLevelNumber) {}
     default void onTimeChanged(int msRemaining) {}
-    default void onGameOver(int finalScore) {}
+    default void onGameOver(int finalScore, int hits, int misses, double accuracy, double averageReaction) {}
 }
