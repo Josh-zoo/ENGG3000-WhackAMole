@@ -18,7 +18,7 @@ const int ECHO_PIN_1 = 33;
 const int TRIG_PIN_2 = 12;
 const int ECHO_PIN_2 = 13;
 
-const unsigned long ECHO_TIMEOUT = 30000; // 30 ms
+const unsigned long ECHO_TIMEOUT = 15000; // 15 ms (~2.5 m, past the back of the field)
 
 // Wi-Fi name, password and laptop IP live in secrets.h (not on GitHub).
 // First time: copy secrets.example.h to secrets.h and fill it in.
@@ -103,13 +103,21 @@ String sensorText(float value) {
 }
 
 void handleRoot() {
-  String page = "<html><head><meta http-equiv='refresh' content='0.5'></head><body>";
+  bool remoteFresh = (millis() - lastRemoteMs) < REMOTE_STALE_MS;
+
+  String page = "<html><head>";
+  page += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  page += "<meta http-equiv='refresh' content='0.5'>";
+  page += "</head><body>";
+
   page += "<h2>ESP32 Sensor Monitor</h2>";
   page += "<p>Sensor 1: " + sensorText(localDist1) + "</p>";
   page += "<p>Sensor 2: " + sensorText(localDist2) + "</p>";
-  page += "<p>Sensor 3: " + sensorText(remoteDist3) + "</p>";
-  page += "<p>Sensor 4: " + sensorText(remoteDist4) + "</p>";
+  page += "<p>Sensor 3: " + sensorText(remoteFresh ? remoteDist3 : -1.0) + "</p>";
+  page += "<p>Sensor 4: " + sensorText(remoteFresh ? remoteDist4 : -1.0) + "</p>";
+
   page += "</body></html>";
+
   server.send(200, "text/html", page);
 }
 
