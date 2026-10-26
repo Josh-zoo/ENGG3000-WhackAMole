@@ -1,10 +1,7 @@
 package whackamole;
 
 import javax.swing.JPanel;
-import javax.swing.KeyStroke;
-import javax.swing.AbstractAction;
 import javax.swing.Timer;
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -15,12 +12,9 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
-import java.awt.event.ActionEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Random;
 import java.awt.Toolkit;
@@ -34,10 +28,9 @@ import java.awt.Toolkit;
  * "ping" (see pingTimer / PING_INTERVAL_MS below), decoupled from the ~60fps
  * render loop.
  *
- * Tracking display: the cursor sits at the player's actual solved (x, y)
- * instead of snapping to a box centre, and every fix leaves a dot that fades
- * out over TRAIL_LIFETIME_MS. Moving produces a fading "snake", which makes
- * the multilateration visible to an audience. Press T to hide/show it.
+ * Tracking display: the player's sensor-derived position is shown as a
+ * pixel-art hammer cursor instead of a raw dot, eased smoothly toward each
+ * new fix rather than snapping to it (see the "hammer cursor" section below).
  *
  * Levels: each level gets its own fresh LEVEL_DURATION_MS clock. Clearing a
  * level's score threshold freezes the board and shows a "LEVEL COMPLETE"
@@ -82,12 +75,20 @@ public class GamePanel extends JPanel {
     // checking every 150 ms never misses a fix and never double-counts much.
     private static final int PING_INTERVAL_MS = 150;
 
-    // ---- snake trail ----
-    private static final int TRAIL_POLL_MS = 100;       // checks for a new fix; one dot per real fix
-    private static final int TRAIL_LIFETIME_MS = 3000;  // how long a dot takes to fade out
-    private static final int TRAIL_MAX_POINTS = 40;
-    private static final Color TRAIL_MULTI = new Color(0, 255, 140);
-    private static final Color TRAIL_SINGLE = new Color(255, 180, 0);
+    // ---- hammer cursor ----
+    // Tracks the player's sensor-derived position with a pixel-art hammer
+    // instead of a raw dot. The displayed position eases toward each new fix
+    // rather than snapping straight to it, so motion stays smooth even though
+    // fixes only arrive every ~150-220 ms (see CURSOR_SMOOTH_ALPHA below).
+    private static final double CURSOR_SMOOTH_ALPHA = 0.25; // per-tick (60fps) ease factor toward the latest fix; lower = smoother but laggier
+    private static final double HAMMER_IDLE_ANGLE = Math.toRadians(-45);  // resting pose: head up-and-right, diagonal
+    private static final double HAMMER_SWING_ANGLE = 0.0;                 // just-hit pose: horizontal
+    private static final long CURSOR_SWING_MS = 220; // how long the cursor stays in the "swung" pose after a hit
+    private static final int HAMMER_HANDLE_LEN = 30;
+    private static final int HAMMER_HANDLE_THICK = 7;
+    private static final int HAMMER_HEAD_LEN = 18;
+    private static final int HAMMER_HEAD_THICK = 15;
+    private static final Color CURSOR_GRIP_COLOR = new Color(0, 255, 140);
 
     // ---- pixel-art tuning --------------------------------------------------
     private static final int PIXEL = 6; // size (in screen px) of one "pixel" block
@@ -134,12 +135,13 @@ public class GamePanel extends JPanel {
     private static final int MOLE_SPRITE_COLS = 16;
     private static final int MOLE_SPRITE_ROWS = 14;
 
-    // Same 16x14 grid, shown briefly right after a successful hit: a hammer
-    // crashes down on the mole's head, with a couple of impact sparks.
+    // Same 16x14 grid, shown briefly right after a successful hit. No hammer
+    // anymore (that's the player's own cursor's job now) -- just a scatter of
+    // impact sparks around the mole's head, with the mole itself unobscured.
     private static final String[] MOLE_HIT_SPRITE = {
-        ".S........DD....",
-        ".....HHHHHH.....",
-        "..S..HHHHHH.S...",
+        "..S..........S..",
+        "S....oo..oo....S",
+        ".S..oBBooBBo..S.",
         "...oBBBBBBBBo...",
         "..oBBBBBBBBBBo..",
         "..oBBBBBBBBBBo..",
@@ -152,7 +154,7 @@ public class GamePanel extends JPanel {
         "....oooooooo....",
         "................",
     };
-    private static final long HIT_DISPLAY_MS = 260; // how long the hammer sprite stays up before sinking
+    private static final long HIT_DISPLAY_MS = 260; // how long the spark sprite stays up before sinking
 
     // ---- palette -----------------------------------------------------------
     private static final Color CABINET_WOOD = new Color(90, 54, 30);
@@ -188,8 +190,6 @@ public class GamePanel extends JPanel {
     private static final int CONTINUE_BTN_W = 220;
     private static final int CONTINUE_BTN_H = 50;
 
-    private record TrailPoint(double xCm, double yCm, boolean multilaterated, long bornAtMs) {}
-
     private final List<Mole> moles = new ArrayList<>();
     private final List<Rectangle> cellBounds = new ArrayList<>();
     private final List<GameListener> listeners = new ArrayList<>();
@@ -197,16 +197,18 @@ public class GamePanel extends JPanel {
     private final LevelManager levelManager = new LevelManager();
     private final Timer loopTimer;
     private final Timer pingTimer;
-    private final Timer trailTimer;
     private final SensorInputBridge sensorInputBridge = new SensorInputBridge();
     private final UdpSensorReader udpSensorReader;
     private final SensorSimulator simulator;
 
     private final BufferedImage grassBackground;
 
-    private final Deque<TrailPoint> trail = new ArrayDeque<>();
-    private long lastTrailSeq = -1;
-    private boolean showTrail = true;
+    // Smoothed, displayed hammer-cursor position (design-pixel space) — eased
+    // toward the latest sensor fix each tick rather than snapping to it.
+    // NaN until the first fix arrives.
+    private double cursorX = Double.NaN;
+    private double cursorY = Double.NaN;
+    private long cursorSwingUntilMs = 0; // while now < this, the cursor shows the horizontal "swung" pose
 
     private String sensorCellLabel = "Cell: --";
     private volatile String sensorDebugLabel = "Wireless: waiting...";
@@ -243,18 +245,7 @@ public class GamePanel extends JPanel {
 
         loopTimer = new Timer(FRAME_DELAY_MS, e -> tick());
         pingTimer = new Timer(PING_INTERVAL_MS, e -> checkForHit());
-        trailTimer = new Timer(TRAIL_POLL_MS, e -> updateTrail());
         layoutHoles();
-
-        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke('t'), "toggleTrail");
-        getInputMap(WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke('T'), "toggleTrail");
-        getActionMap().put("toggleTrail", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                showTrail = !showTrail;
-                repaint();
-            }
-        });
 
         if (simulate) {
             udpSensorReader = null;
@@ -265,7 +256,6 @@ public class GamePanel extends JPanel {
             udpSensorReader = new UdpSensorReader(this::handleSensorLine);
             udpSensorReader.start();
         }
-        trailTimer.start(); // runs outside rounds too, so tracking can be shown on its own
     }
 
     public void addGameListener(GameListener listener) {
@@ -364,22 +354,27 @@ public class GamePanel extends JPanel {
         return holeCenterY(cellY) - HOLE_H / 2 + 6;
     }
 
-    // ---- snake trail -------------------------------------------------------
+    // ---- hammer cursor -------------------------------------------------------
 
-    /** Adds a dot only when the bridge has produced a NEW fix, then drops dots that have fully faded. */
-    private void updateTrail() {
-        long now = System.currentTimeMillis();
+    /**
+     * Eases the displayed cursor position toward the latest sensor fix by a
+     * fixed fraction every tick (60fps), instead of snapping straight to each
+     * new fix. A fix only arrives every ~150-220 ms, so without this the
+     * cursor would sit still and then teleport; with it, each new fix just
+     * becomes a new target the cursor glides toward over the next several
+     * frames.
+     */
+    private void updateCursorSmoothing() {
         SensorInputBridge.Fix fix = sensorInputBridge.getLatestFix();
-        if (fix != null && fix.seq != lastTrailSeq) {
-            lastTrailSeq = fix.seq;
-            trail.addLast(new TrailPoint(fix.xCm, fix.yCm,
-                    fix.kind == SensorInputBridge.Kind.MULTILATERATED, fix.timeMs));
-            while (trail.size() > TRAIL_MAX_POINTS) trail.removeFirst();
+        if (fix == null) return;
+        Point target = toBoard(fix.xCm, fix.yCm);
+        if (Double.isNaN(cursorX)) {
+            cursorX = target.x;
+            cursorY = target.y;
+        } else {
+            cursorX += (target.x - cursorX) * CURSOR_SMOOTH_ALPHA;
+            cursorY += (target.y - cursorY) * CURSOR_SMOOTH_ALPHA;
         }
-        while (!trail.isEmpty() && now - trail.peekFirst().bornAtMs() > TRAIL_LIFETIME_MS) {
-            trail.removeFirst();
-        }
-        if (!running) repaint(); // the game loop repaints while a round is on
     }
 
     /** Field cm -> panel px. x spans the field width; y spans the playable depth (row 0 nearest the sky). */
@@ -400,6 +395,8 @@ public class GamePanel extends JPanel {
     private void tick() {
         if (!running) return;
         long now = System.currentTimeMillis();
+
+        updateCursorSmoothing(); // keep the hammer gliding even while frozen for intermission
 
         if (intermissionActive) {
             updateIntermission(now);
@@ -426,7 +423,7 @@ public class GamePanel extends JPanel {
         repaint();
     }
 
-    /** Once the hammer sprite has had its moment, sink the mole like any other. */
+    /** Once the spark sprite has had its moment, sink the mole like any other. */
     private void finalizeHitMoles(long now) {
         for (Mole mole : moles) {
             if (mole.isHitDisplayExpired(now, HIT_DISPLAY_MS)) {
@@ -485,7 +482,8 @@ public class GamePanel extends JPanel {
         totalReactionTime += now - currentMoleSpawnTime;
         fireScoreChanged();
         mole.markResolved();
-        mole.markHit(now); // show the hammer sprite briefly instead of vanishing instantly
+        mole.markHit(now); // show the spark sprite briefly instead of vanishing instantly
+        cursorSwingUntilMs = now + CURSOR_SWING_MS; // and swing the player's own hammer cursor to match
         if (levelManager.maybeAdvance(score)) {
             fireLevelChanged();
             enterIntermission(now);
@@ -636,16 +634,12 @@ public class GamePanel extends JPanel {
         // ...but switch back to smoothed drawing for the tracking overlay, it reads much better.
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        if (showTrail) {
-            drawTrail(g2, now);
-        }
-        SensorInputBridge.Fix fix = sensorInputBridge.getLatestFix();
-        if (fix != null) {
-            drawCursor(g2, toBoard(fix.xCm, fix.yCm));
+        if (!Double.isNaN(cursorX)) {
+            boolean swung = now < cursorSwingUntilMs;
+            drawHammerCursor(g2, (int) Math.round(cursorX), (int) Math.round(cursorY), swung);
         }
 
         drawDebugPanel(g2);
-        drawTrailLegend(g2);
 
         if (intermissionActive) {
             drawIntermissionOverlay(g2, now);
@@ -811,7 +805,7 @@ public class GamePanel extends JPanel {
             case 'N' -> MOLE_NOSE;
             case 'H' -> HAMMER_HEAD;
             case 'D' -> HAMMER_HANDLE;
-            case 'S' -> CLOUD_COLOR;
+            case 'S' -> SUN_COLOR;
             default -> null;
         };
     }
@@ -858,43 +852,6 @@ public class GamePanel extends JPanel {
         g2.drawString(text, centerX - fm.stringWidth(text) / 2, baselineY);
     }
 
-    /** Oldest dots first so newer ones paint on top. Alpha and size both shrink with age. */
-    private void drawTrail(Graphics2D g2, long now) {
-        TrailPoint prev = null;
-        for (TrailPoint tp : trail) {
-            double life = 1.0 - (now - tp.bornAtMs()) / (double) TRAIL_LIFETIME_MS;
-            if (life <= 0) { prev = tp; continue; }
-            int alpha = (int) Math.round(230 * life);
-            Color base = tp.multilaterated() ? TRAIL_MULTI : TRAIL_SINGLE;
-            Point p = toBoard(tp.xCm(), tp.yCm());
-
-            if (prev != null) {
-                Point q = toBoard(prev.xCm(), prev.yCm());
-                g2.setStroke(new BasicStroke(2f));
-                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha / 3));
-                g2.drawLine(q.x, q.y, p.x, p.y);
-            }
-
-            int r = (int) Math.round(3 + 5 * life);
-            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
-            g2.fillOval(p.x - r, p.y - r, 2 * r, 2 * r);
-            prev = tp;
-        }
-    }
-
-    private void drawTrailLegend(Graphics2D g2) {
-        g2.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
-        int y = FIELD_OFFSET_Y + BOARD_HEIGHT_PX - 8;
-        g2.setColor(TRAIL_MULTI);
-        g2.fillOval(FIELD_OFFSET_X + 10, y - 8, 8, 8);
-        g2.setColor(new Color(230, 230, 230));
-        g2.drawString("multilaterated", FIELD_OFFSET_X + 22, y);
-        g2.setColor(TRAIL_SINGLE);
-        g2.fillOval(FIELD_OFFSET_X + 112, y - 8, 8, 8);
-        g2.setColor(new Color(230, 230, 230));
-        g2.drawString("single echo    T = trail " + (showTrail ? "on" : "off"), FIELD_OFFSET_X + 124, y);
-    }
-
     private void drawDeadZoneWarning(Graphics2D g2) {
         g2.setColor(new Color(220, 0, 0, 180));
         g2.fillRect(0, 0, DESIGN_WIDTH, 35);
@@ -905,22 +862,37 @@ public class GamePanel extends JPanel {
         g2.drawString("DEAD ZONE - MOVE BACK", 10, 24);
     }
 
-    private void drawCursor(Graphics2D g2, Point point) {
-        if (point == null || point.x < 0 || point.y < 0) {
-            return;
-        }
+    /**
+     * The player's tracked position, drawn as a pixel-art hammer instead of a
+     * dot. (x, y) is the grip/hotspot -- where the hit actually registers --
+     * with the hammer extending out from it. Idle pose holds the head up and
+     * to the right on the diagonal; right after a hit it swings level to
+     * horizontal, as if it's just come down, then eases back to idle.
+     */
+    private void drawHammerCursor(Graphics2D g2, int x, int y, boolean swung) {
+        AffineTransform old = g2.getTransform();
+        g2.translate(x, y);
+        g2.rotate(swung ? HAMMER_SWING_ANGLE : HAMMER_IDLE_ANGLE);
 
-        int size = 18;
-        int x = point.x - size / 2;
-        int y = point.y - size / 2;
+        g2.setColor(HAMMER_HANDLE);
+        g2.fillRect(0, -HAMMER_HANDLE_THICK / 2, HAMMER_HANDLE_LEN, HAMMER_HANDLE_THICK);
+        g2.setColor(MOLE_OUTLINE);
+        g2.drawRect(0, -HAMMER_HANDLE_THICK / 2, HAMMER_HANDLE_LEN, HAMMER_HANDLE_THICK);
 
-        g2.setColor(new Color(0, 255, 140));
-        g2.fillOval(x, y, size, size);
+        int headX = HAMMER_HANDLE_LEN - 5;
+        g2.setColor(HAMMER_HEAD);
+        g2.fillRect(headX, -HAMMER_HEAD_THICK / 2, HAMMER_HEAD_LEN, HAMMER_HEAD_THICK);
+        g2.setColor(MOLE_OUTLINE);
+        g2.drawRect(headX, -HAMMER_HEAD_THICK / 2, HAMMER_HEAD_LEN, HAMMER_HEAD_THICK);
+
+        // Grip dot right at the tracked point, so it's still clear exactly
+        // where the hit registers underneath the hammer art.
+        g2.setColor(CURSOR_GRIP_COLOR);
+        g2.fillOval(-4, -4, 8, 8);
         g2.setColor(Color.BLACK);
-        g2.setStroke(new BasicStroke(2));
-        g2.drawOval(x, y, size, size);
-        g2.drawLine(point.x - 12, point.y, point.x + 12, point.y);
-        g2.drawLine(point.x, point.y - 12, point.x, point.y + 12);
+        g2.drawOval(-4, -4, 8, 8);
+
+        g2.setTransform(old);
     }
 
     /** Small translucent readout panel in the sky, holding the three debug/status lines. */
