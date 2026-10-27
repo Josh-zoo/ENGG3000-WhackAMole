@@ -82,13 +82,37 @@ public class GamePanel extends JPanel {
     // fixes only arrive every ~150-220 ms (see CURSOR_SMOOTH_ALPHA below).
     private static final double CURSOR_SMOOTH_ALPHA = 0.25; // per-tick (60fps) ease factor toward the latest fix; lower = smoother but laggier
     private static final double HAMMER_IDLE_ANGLE = Math.toRadians(-45);  // resting pose: head up-and-right, diagonal
-    private static final double HAMMER_SWING_ANGLE = 0.0;                 // just-hit pose: horizontal
-    private static final long CURSOR_SWING_MS = 220; // how long the cursor stays in the "swung" pose after a hit
-    private static final int HAMMER_HANDLE_LEN = 30;
-    private static final int HAMMER_HANDLE_THICK = 7;
-    private static final int HAMMER_HEAD_LEN = 18;
-    private static final int HAMMER_HEAD_THICK = 15;
-    private static final Color CURSOR_GRIP_COLOR = new Color(0, 255, 140);
+    private static final double HAMMER_SWING_ANGLE = 0.0;                 // just-hit pose: horizontal (the sprite is authored in this pose)
+    private static final long CURSOR_SWING_MS = 280; // how long the cursor stays in the "swung" pose after a hit
+
+    // Hand-authored pixel-art hammer, drawn as-is for the "just swung" pose
+    // (horizontal, grip on the left) and rotated -45 deg for the idle pose
+    // (head up-and-right, diagonal) -- same rotate-the-art trick as the mole
+    // sprites use rise/sink animation, just applied to rotation instead.
+    private static final int HAMMER_PIXEL = 5; // size (in screen px) of one hammer "pixel" block
+    private static final String[] HAMMER_SPRITE = {
+        "...........ooooorr",
+        "...........oGGGGGr",
+        ".........ooGGGGGGo",
+        "oooooooooHHGGGGGGo",
+        "oHhHHhHHhHHggggggo",
+        "oooooooooHHggggggo",
+        ".........ooggggggo",
+        "...........ogggggo",
+        "...........ooooooo",
+    };
+    private static final int HAMMER_SPRITE_COLS = 18;
+    private static final int HAMMER_SPRITE_ROWS = 9;
+    // Where the tracked point sits within the sprite grid: the left-hand tip
+    // of the grip, vertically centered on the handle. Everything is drawn
+    // relative to this so rotation pivots around the player's actual position.
+    private static final int HAMMER_GRIP_COL = 0;
+    private static final int HAMMER_GRIP_ROW = 4;
+    private static final Color HAMMER_HEAD_LIGHT = new Color(205, 206, 214);
+    private static final Color HAMMER_HEAD_DARK = new Color(122, 123, 133);
+    private static final Color HAMMER_HANDLE_LIGHT = new Color(150, 103, 58);
+    private static final Color HAMMER_HANDLE_DARK = new Color(103, 68, 36);
+    private static final Color HAMMER_ACCENT = new Color(178, 94, 70);
 
     // ---- pixel-art tuning --------------------------------------------------
     private static final int PIXEL = 6; // size (in screen px) of one "pixel" block
@@ -874,25 +898,31 @@ public class GamePanel extends JPanel {
         g2.translate(x, y);
         g2.rotate(swung ? HAMMER_SWING_ANGLE : HAMMER_IDLE_ANGLE);
 
-        g2.setColor(HAMMER_HANDLE);
-        g2.fillRect(0, -HAMMER_HANDLE_THICK / 2, HAMMER_HANDLE_LEN, HAMMER_HANDLE_THICK);
-        g2.setColor(MOLE_OUTLINE);
-        g2.drawRect(0, -HAMMER_HANDLE_THICK / 2, HAMMER_HANDLE_LEN, HAMMER_HANDLE_THICK);
-
-        int headX = HAMMER_HANDLE_LEN - 5;
-        g2.setColor(HAMMER_HEAD);
-        g2.fillRect(headX, -HAMMER_HEAD_THICK / 2, HAMMER_HEAD_LEN, HAMMER_HEAD_THICK);
-        g2.setColor(MOLE_OUTLINE);
-        g2.drawRect(headX, -HAMMER_HEAD_THICK / 2, HAMMER_HEAD_LEN, HAMMER_HEAD_THICK);
-
-        // Grip dot right at the tracked point, so it's still clear exactly
-        // where the hit registers underneath the hammer art.
-        g2.setColor(CURSOR_GRIP_COLOR);
-        g2.fillOval(-4, -4, 8, 8);
-        g2.setColor(Color.BLACK);
-        g2.drawOval(-4, -4, 8, 8);
+        int originX = -HAMMER_GRIP_COL * HAMMER_PIXEL;
+        int originY = -HAMMER_GRIP_ROW * HAMMER_PIXEL;
+        for (int row = 0; row < HAMMER_SPRITE_ROWS; row++) {
+            String line = HAMMER_SPRITE[row];
+            for (int col = 0; col < HAMMER_SPRITE_COLS; col++) {
+                Color c = hammerColorFor(line.charAt(col));
+                if (c == null) continue;
+                g2.setColor(c);
+                g2.fillRect(originX + col * HAMMER_PIXEL, originY + row * HAMMER_PIXEL, HAMMER_PIXEL, HAMMER_PIXEL);
+            }
+        }
 
         g2.setTransform(old);
+    }
+
+    private Color hammerColorFor(char c) {
+        return switch (c) {
+            case 'o' -> MOLE_OUTLINE;
+            case 'H' -> HAMMER_HANDLE_LIGHT;
+            case 'h' -> HAMMER_HANDLE_DARK;
+            case 'G' -> HAMMER_HEAD_LIGHT;
+            case 'g' -> HAMMER_HEAD_DARK;
+            case 'r' -> HAMMER_ACCENT;
+            default -> null;
+        };
     }
 
     /** Small translucent readout panel in the sky, holding the three debug/status lines. */
