@@ -132,7 +132,7 @@ public class SensorInputBridge {
      * stray echo off the wall) gets swapped for the median before the solver
      * sees it. Normal readings pass through untouched, so walking adds no lag.
      */
-    private static final int RANGE_WINDOW = 3;
+    private static final int RANGE_WINDOW = 5; // a glitch must win 3 of 5 readings to get through
     /** A reading this far from its sensor's recent median counts as a spike and is replaced by the median. */
     private static final double SPIKE_CM = 15.0;
     /** Readings older than this are forgotten, so a stale value never lingers. */
@@ -144,7 +144,7 @@ public class SensorInputBridge {
      * get SMOOTH_ALPHA_MIN, a move of FAST_MOVE_CM or more gets SMOOTH_ALPHA_MAX,
      * so the cursor is calm when you stand still and keeps up when you move.
      */
-    private static final double SMOOTH_ALPHA_MIN = 0.3;
+    private static final double SMOOTH_ALPHA_MIN = 0.5;
     private static final double SMOOTH_ALPHA_MAX = 0.9;
     private static final double FAST_MOVE_CM = 30.0;
     /** Single-echo fixes are rough guesses, so they only nudge the position. */
@@ -188,6 +188,8 @@ public class SensorInputBridge {
     private final long[][] rangeHistoryTime = new long[SENSOR_X_CM.length][RANGE_WINDOW];
     private final int[] rangeHistoryCount = new int[SENSOR_X_CM.length];
     private final int[] rangeHistoryNext = new int[SENSOR_X_CM.length];
+    /** Last filtered range per sensor, used to break ties when only an even number of readings is recent. */
+    private final double[] lastFiltered = new double[SENSOR_X_CM.length];
 
     /** The game uses this: smoothing on. */
     public SensorInputBridge() {
@@ -215,14 +217,15 @@ public class SensorInputBridge {
 
     /** Same as accept() but with ranges already parsed (NaN = no echo). Used by tests and sim mode. */
     public synchronized Fix acceptRanges(double[] ranges, long nowMs) {
-        // Proximity alarm runs on RAW ranges, before any field filtering, so it
-        // still fires when the player is too close for a clean fix.
+        double[] filtered = smoothing ? medianFilter(ranges, nowMs) : ranges;
+
+        // Proximity alarm runs on the median-filtered ranges, before any field
+        // filtering, so it still fires when the player is too close for a clean
+        // fix but a single stray short echo (crosstalk) can't trigger it.
         boolean close = false;
-        for (double r : ranges) {
+        for (double r : filtered) {
             if (isValid(r) && r < DEAD_ZONE_CM) close = true;
         }
-
-        double[] filtered = smoothing ? medianFilter(ranges, nowMs) : ranges;
         Fix fix = solve(filtered, nowMs);
         if (fix != null && fix.yCm < DEAD_ZONE_CM) close = true;
         inDeadZone = close;
@@ -304,9 +307,20 @@ public class SensorInputBridge {
             }
             if (n == 0) { out[i] = Double.NaN; continue; }
             java.util.Arrays.sort(recent, 0, n);
-            double median = (n % 2 == 1) ? recent[n / 2] : (recent[n / 2 - 1] + recent[n / 2]) / 2.0;
+            double median;
+            if (n % 2 == 1) {
+                median = recent[n / 2];
+            } else {
+                // Never average two readings: [160, 30] would give 95, a distance
+                // nobody measured. Keep whichever middle value is closer to where
+                // this sensor was last, or the newest reading if there is no history.
+                double lo = recent[n / 2 - 1], hi = recent[n / 2];
+                double ref = isValid(lastFiltered[i]) ? lastFiltered[i] : (isValid(raw[i]) ? raw[i] : hi);
+                median = Math.abs(lo - ref) <= Math.abs(hi - ref) ? lo : hi;
+            }
             boolean spike = isValid(raw[i]) && Math.abs(raw[i] - median) > SPIKE_CM;
             out[i] = (isValid(raw[i]) && !spike) ? raw[i] : median;
+            lastFiltered[i] = out[i];
         }
         return out;
     }

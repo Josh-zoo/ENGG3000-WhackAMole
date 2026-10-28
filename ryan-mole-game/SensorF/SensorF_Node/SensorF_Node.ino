@@ -149,5 +149,5 @@ void loop() {
     Serial.println(")");
   }
 
-  delay(40);
+  delay(10); // loop pacing only; the 40 ms gap between pings is what stops crosstalk
 }
