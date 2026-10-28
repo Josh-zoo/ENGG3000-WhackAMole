@@ -19,6 +19,8 @@ public class Mole {
     private long hideStartMs = -1;   // timestamp the sinking animation began; -1 if not sinking
     private boolean hit = false;     // true for a brief moment right after a successful hit
     private long hitStartMs = -1;
+    private MoleType type = MoleType.NORMAL;
+    private boolean squashed = false; // stays true through the sink after a hit, so it doesn't pop back to full height
 
     public Mole(int x, int y, int diameter) {
         this.x = x;
@@ -26,8 +28,14 @@ public class Mole {
         this.diameter = diameter;
     }
 
-    /** Makes the mole appear now, and stay up for upDurationMs. */
+    /** Makes a normal mole appear now, and stay up for upDurationMs. */
     public void popUp(long nowMs, long upDurationMs) {
+        popUp(nowMs, upDurationMs, MoleType.NORMAL);
+    }
+
+    /** Makes a mole of the given type appear now, and stay up for upDurationMs. */
+    public void popUp(long nowMs, long upDurationMs, MoleType type) {
+        this.type = type;
         this.visible = true;
         this.popTimeMs = nowMs;
         this.upDurationMs = upDurationMs;
@@ -35,6 +43,7 @@ public class Mole {
         this.hideStartMs = -1;
         this.hit = false;
         this.hitStartMs = -1;
+        this.squashed = false;
     }
 
     public void hide() {
@@ -42,12 +51,28 @@ public class Mole {
         this.hideStartMs = -1;
         this.hit = false;
         this.hitStartMs = -1;
+        this.squashed = false;
     }
 
     /** Marks this mole as just-hit: rendering shows the hammer sprite until isHitDisplayExpired() triggers a sink. */
     public void markHit(long nowMs) {
         this.hit = true;
         this.hitStartMs = nowMs;
+        this.squashed = true;
+    }
+
+    /** True from the moment it's hit until it's hidden (including the sink afterwards). */
+    public boolean isSquashed() {
+        return squashed;
+    }
+
+    /** ms since the hit landed; -1 if never hit this pop-up. */
+    public long msSinceHit(long nowMs) {
+        return hitStartMs < 0 ? -1 : nowMs - hitStartMs;
+    }
+
+    public MoleType getType() {
+        return type;
     }
 
     public boolean isHit() {

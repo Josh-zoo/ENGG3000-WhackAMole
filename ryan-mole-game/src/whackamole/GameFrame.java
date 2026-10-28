@@ -72,7 +72,7 @@ public class GameFrame extends JFrame {
 
     private final JLabel scoreLabel = new JLabel("SCORE 0000");
     private final JLabel levelLabel = new JLabel("LVL 1");
-    private final JLabel timeLabel = new JLabel("TIME 30");
+    private final JLabel timeLabel = new JLabel("TIME 60");
     private final GamePanel gamePanel;
     private final HighScoreManager highScoreManager = new HighScoreManager();
     private final JTextArea highScoresText = new JTextArea();
@@ -82,12 +82,17 @@ public class GameFrame extends JFrame {
     }
 
     public GameFrame(boolean simulate) {
-        super(simulate ? "Whack-a-Mole (SIMULATED SENSORS)" : "Whack-a-Mole");
+        this(simulate, false);
+    }
+
+    /** @param mouse true = play with the mouse instead of the sensors (testing only). */
+    public GameFrame(boolean simulate, boolean mouse) {
+        super(mouse ? "Whack-a-Mole (MOUSE MODE)" : simulate ? "Whack-a-Mole (SIMULATED SENSORS)" : "Whack-a-Mole");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
         getContentPane().setBackground(CABINET_BG);
 
-        gamePanel = new GamePanel(simulate);
+        gamePanel = new GamePanel(simulate, mouse);
 
         cards.setBackground(CABINET_BG);
         cards.add(buildMenuPanel(), CARD_MENU);
@@ -111,8 +116,13 @@ public class GameFrame extends JFrame {
 
             @Override
             public void onTimeChanged(int msRemaining) {
-                SwingUtilities.invokeLater(() ->
-                        timeLabel.setText("TIME " + (msRemaining / 1000)));
+                SwingUtilities.invokeLater(() -> {
+                    timeLabel.setText("TIME " + (int) Math.ceil(msRemaining / 1000.0));
+                    // Last 10 s: blink red/white so it grabs attention.
+                    boolean low = msRemaining <= 10_000;
+                    boolean flashOn = (System.currentTimeMillis() / 250) % 2 == 0;
+                    timeLabel.setForeground(low && !flashOn ? Color.WHITE : TIME_COLOR);
+                });
             }
 
             @Override
@@ -219,12 +229,14 @@ public class GameFrame extends JFrame {
             "under an active mole before its yellow timer bar runs out\n" +
             "to score a hit -- you'll see it get bonked with a hammer!\n\n" +
             "Miss the timer and the mole just slips back underground.\n\n" +
-            "Clearing a level's score threshold pauses the game with a\n" +
-            "LEVEL COMPLETE screen. Hover over the CONTINUE button\n" +
-            "(just stand in that zone) to start the next level fresh,\n" +
-            "with its own 30-second clock.\n\n" +
-            "Moles get faster and more numerous each level. If the clock\n" +
-            "runs out before you clear a level, the game ends.\n\n" +
+            "Each level gives you 60 seconds to hit its points target\n" +
+            "(shown in the bar under the board). Reach it and the game\n" +
+            "pauses on a LEVEL COMPLETE screen. Stand in the CONTINUE\n" +
+            "zone to start the next level, with new scenery and a\n" +
+            "fresh clock. If time runs out first, the game ends.\n\n" +
+            "Coloured moles are power-ups: GOLD = double points for 10s,\n" +
+            "BLUE = +10 seconds, ICE = clock frozen for 5s.\n\n" +
+            "Moles get faster and more numerous each level.\n\n" +
             "Stay out of the dead zone near the screen -- a red banner\n" +
             "and a beep will warn you if you get too close!"
         );

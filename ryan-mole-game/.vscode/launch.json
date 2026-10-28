@@ -5,15 +5,20 @@
             "type": "java",
             "name": "Main",
             "request": "launch",
-            "mainClass": "whackamole.Main",
-            "projectName": "mole-game_fca9eb75"
+            "mainClass": "whackamole.Main"
         },
         {
             "type": "java",
             "name": "Launch Main",
             "request": "launch",
+            "mainClass": "whackamole.Main"
+        },
+        {
+            "type": "java",
+            "name": "Main (MOUSE TEST, no sensors)",
+            "request": "launch",
             "mainClass": "whackamole.Main",
-            "projectName": "mole-game"
+            "args": "--mouse"
         }
     ]
 }
