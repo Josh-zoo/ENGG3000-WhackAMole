@@ -18,7 +18,7 @@ const int ECHO_PIN_1 = 33;
 const int TRIG_PIN_2 = 12;
 const int ECHO_PIN_2 = 13;
 
-const unsigned long ECHO_TIMEOUT = 15000; // 15 ms (~2.5 m, past the back of the field)
+const unsigned long ECHO_TIMEOUT = 20000; // 15 ms (~2.5 m, past the back of the field)
 
 // Wi-Fi name, password and laptop IP live in secrets.h (not on GitHub).
 // First time: copy secrets.example.h to secrets.h and fill it in.

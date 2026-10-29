@@ -17,7 +17,7 @@ const int TRIG_PIN_4 = 12;   // GPIO 12 is a boot-strapping pin. If box 2 ever r
                              // to start after a power cycle, move this wire to 18.
 const int ECHO_PIN_4 = 13;
 
-const unsigned long ECHO_TIMEOUT = 15000; // 15 ms (~2.5 m, past the back of the field)
+const unsigned long ECHO_TIMEOUT = 20000; // 15 ms (~2.5 m, past the back of the field)
 
 // Wi-Fi name/password (must match box 1) and box 1's MAC address live in
 // secrets.h (not on GitHub). First time: copy secrets.example.h to secrets.h.
