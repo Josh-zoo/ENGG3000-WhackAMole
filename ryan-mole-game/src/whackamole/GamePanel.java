@@ -249,9 +249,7 @@ public class GamePanel extends JPanel {
     private static final int RISE_DISTANCE = 42;    // vertical travel, in px
 
     // ---- level-complete intermission ---------------------------------------
-    private static final long HOVER_HOLD_MS = 900; // how long to hover the button to continue
-    private static final int CONTINUE_BTN_W = 220;
-    private static final int CONTINUE_BTN_H = 50;
+    private static final long INTERMISSION_DISPLAY_MS = 5000; // how long to show "LEVEL COMPLETE" before auto-advancing
 
     private final List<Mole> moles = new ArrayList<>();
     private final List<Rectangle> cellBounds = new ArrayList<>();
@@ -317,7 +315,7 @@ public class GamePanel extends JPanel {
     // Level target reached: the LEVEL COMPLETE screen waits until this time so the
     // winning hit's smash animation plays out first. -1 = nothing pending.
     private long pendingIntermissionAtMs = -1;
-    private long intermissionHoverStartMs = -1; // -1 while the player isn't over the continue button
+    private long intermissionEndsAtMs = -1; // wall-clock time the auto-advance fires; -1 while not in intermission
 
     public GamePanel() {
         this(false);
@@ -465,7 +463,7 @@ public class GamePanel extends JPanel {
         currentMoleSpawnTime = 0;
         levelManager.reset();
         intermissionActive = false;
-        intermissionHoverStartMs = -1;
+        intermissionEndsAtMs = -1;
         pendingIntermissionAtMs = -1;
         levelScore = 0;
         clearPowerUps();
@@ -793,7 +791,7 @@ public class GamePanel extends JPanel {
 
     private void enterIntermission(long now) {
         intermissionActive = true;
-        intermissionHoverStartMs = -1;
+        intermissionEndsAtMs = now + INTERMISSION_DISPLAY_MS;
         clearPowerUps(); // effects don't carry over into the next level
         levelScore = 0;  // HUD now previews the next level's target from zero
         themeFadeStartMs = now; // the new level's scenery fades in behind the "complete" screen
@@ -803,22 +801,12 @@ public class GamePanel extends JPanel {
     }
 
     /**
-     * Hover-to-continue uses the SAME sensor-tracked position used to play —
-     * no mouse needed. Stand in the zone that maps onto the on-screen button
-     * for HOVER_HOLD_MS to start the next level.
+     * No player action needed — the "LEVEL COMPLETE" screen is shown for
+     * INTERMISSION_DISPLAY_MS and then the next level starts automatically.
      */
     private void updateIntermission(long now) {
-        Rectangle btn = continueButtonBounds();
-        Point p = playerPoint();
-
-        if (p != null && btn.contains(p)) {
-            if (intermissionHoverStartMs < 0) {
-                intermissionHoverStartMs = now;
-            } else if (now - intermissionHoverStartMs >= HOVER_HOLD_MS) {
-                exitIntermission(now);
-            }
-        } else {
-            intermissionHoverStartMs = -1;
+        if (now >= intermissionEndsAtMs) {
+            exitIntermission(now);
         }
     }
 
@@ -827,19 +815,9 @@ public class GamePanel extends JPanel {
         roundEndAtMs = now + duration; // fresh full timer for the new level
         levelScore = 0;                 // and a fresh target to chase
         intermissionActive = false;
-        intermissionHoverStartMs = -1;
+        intermissionEndsAtMs = -1;
         scheduleNextSpawn(now);
         fireTimeChanged(duration);
-    }
-
-    private Rectangle continueButtonBounds() {
-        // Design-space coordinates: this is compared against toBoard(), which
-        // also returns design-space points, and drawn inside the scaled
-        // transform in paintComponent() -- never against the real (fullscreen)
-        // panel size.
-        int x = (DESIGN_WIDTH - CONTINUE_BTN_W) / 2;
-        int y = FIELD_OFFSET_Y + BOARD_HEIGHT_PX / 2 + 10;
-        return new Rectangle(x, y, CONTINUE_BTN_W, CONTINUE_BTN_H);
     }
 
     // ---- rendering ---------------------------------------------------------
@@ -1451,47 +1429,41 @@ public class GamePanel extends JPanel {
         };
     }
 
-    /** Dims the board and shows a "level complete, hover to continue" prompt. */
+    /** Dims the board and shows a "level complete" message that auto-advances after a few seconds. */
     private void drawIntermissionOverlay(Graphics2D g2, long now) {
         g2.setColor(OVERLAY_TINT);
         g2.fillRect(BORDER, BORDER, BOARD_WIDTH_PX, SKY_HEIGHT + BOARD_HEIGHT_PX);
 
         int centerX = DESIGN_WIDTH / 2;
-        int completedLevel = levelManager.getCurrentLevel().getNumber() - 1;
 
         g2.setFont(OVERLAY_TITLE_FONT);
         g2.setColor(Color.WHITE);
-        drawCenteredString(g2, "LEVEL " + completedLevel + " COMPLETE!", centerX, FIELD_OFFSET_Y + 60);
+        drawCenteredString(g2, "CONGRATULATIONS! LEVEL COMPLETE.", centerX, FIELD_OFFSET_Y + 60);
 
         g2.setFont(OVERLAY_TEXT_FONT);
         g2.setColor(SUN_COLOR);
         Level next = levelManager.getCurrentLevel();
-        drawCenteredString(g2, "GOOD JOB! STAND ON THE BUTTON", centerX, FIELD_OFFSET_Y + 92);
-        drawCenteredString(g2, "TO START LEVEL " + next.getNumber(), centerX, FIELD_OFFSET_Y + 112);
+        drawCenteredString(g2, "STARTING LEVEL " + next.getNumber(), centerX, FIELD_OFFSET_Y + 96);
         g2.setColor(Color.WHITE);
         String goal = next.hasTarget()
                 ? "NEXT TARGET: " + next.getTargetScore() + " PTS IN " + (next.getDurationMs() / 1000) + "s"
                 : "FINAL LEVEL: " + (next.getDurationMs() / 1000) + "s TO SCORE ALL YOU CAN";
-        drawCenteredString(g2, goal, centerX, FIELD_OFFSET_Y + 136);
+        drawCenteredString(g2, goal, centerX, FIELD_OFFSET_Y + 120);
 
-        Rectangle btn = continueButtonBounds();
-        double hoverProgress = 0;
-        if (intermissionHoverStartMs >= 0) {
-            hoverProgress = Math.min(1.0, (now - intermissionHoverStartMs) / (double) HOVER_HOLD_MS);
-        }
+        // A shrinking bar shows how much longer until the automatic advance.
+        long msLeft = Math.max(0, intermissionEndsAtMs - now);
+        double remainingFraction = Math.min(1.0, msLeft / (double) INTERMISSION_DISPLAY_MS);
+        int barW = 220;
+        int barH = 14;
+        int barX = centerX - barW / 2;
+        int barY = FIELD_OFFSET_Y + BOARD_HEIGHT_PX / 2 + 10;
 
         g2.setColor(TIMER_BAR_BG);
-        g2.fillRect(btn.x, btn.y, btn.width, btn.height);
-        int fillW = (int) Math.round(btn.width * hoverProgress);
+        g2.fillRect(barX, barY, barW, barH);
         g2.setColor(SUN_COLOR);
-        g2.fillRect(btn.x, btn.y, fillW, btn.height);
+        g2.fillRect(barX, barY, (int) Math.round(barW * remainingFraction), barH);
         g2.setColor(MOLE_OUTLINE);
-        g2.drawRect(btn.x, btn.y, btn.width, btn.height);
-        g2.drawRect(btn.x + 1, btn.y + 1, btn.width - 2, btn.height - 2);
-
-        g2.setFont(OVERLAY_TEXT_FONT);
-        g2.setColor(hoverProgress > 0.5 ? Color.BLACK : Color.WHITE);
-        drawCenteredString(g2, "CONTINUE", btn.x + btn.width / 2, btn.y + btn.height / 2 + 5);
+        g2.drawRect(barX, barY, barW, barH);
     }
 
     private void drawCenteredString(Graphics2D g2, String text, int centerX, int baselineY) {
